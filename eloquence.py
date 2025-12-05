@@ -182,6 +182,7 @@ class EloquenceSettingsPanel(gui.SettingsPanel):
         import urllib.request, zipfile, os, shutil, globalPluginHandler
         from scriptHandler import script
         
+        self.onSave
         dictionary_url = config.conf.get('eloquence', {}).get('dictionary_url')
         if not dictionary_url:
             wx.MessageBox("Please select a dictionary first.", "Error", wx.OK | wx.ICON_ERROR)
@@ -215,7 +216,7 @@ class EloquenceSettingsPanel(gui.SettingsPanel):
             os.remove(zip_path)
             shutil.rmtree(extracted_folder_path) # a command to remove a folder in python.
             
-            wx.MessageBox("Dictionary updated successfully. Please restart NVDA for the changes to take effect.", "Success", wx.OK | wx.ICON_INFORMATION)
+            wx.MessageBox("Dictionary updated successfully. Please reload your Eloquence synthesizer or restart NVDA for the changes to take effect.", "Success", wx.OK | wx.ICON_INFORMATION)
 
         except Exception as e:
             wx.MessageBox(f"An error occurred while updating the dictionary: {e}", "Error", wx.OK | wx.ICON_ERROR)
