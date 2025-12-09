@@ -176,8 +176,7 @@ class EloquenceHostClient:
             return
         if version_year >= 2025:
             device = config.conf["audio"]["outputDevice"]
-            ducking = True if config.conf["audio"]["audioDuckingMode"] else False
-            player = nvwave.WavePlayer(1, 11025, 16, outputDevice=device, wantDucking=ducking)
+            player = nvwave.WavePlayer(1, 11025, 16, outputDevice=device)
         else:
             device = config.conf["speech"]["outputDevice"]
             nvwave.WavePlayer.MIN_BUFFER_MS = 1500
