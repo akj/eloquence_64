@@ -498,7 +498,7 @@ class SynthDriver(synthDriverHandler.SynthDriver):
     def _resolve_voice_for_language(self, language):
         if not language:
             return getattr(self, "_defaultVoice", None)
-        normalized = language.lower()
+        normalized = language.lower().replace('_', '-')
         voice_id = LANGUAGE_TO_VOICE_ID.get(normalized)
         if voice_id:
             return voice_id
