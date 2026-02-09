@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 
 minRate=40
 maxRate=150
-pause_re = re.compile(r'([a-zA-Z])([.(),:;!?])( |$)')
+pause_re = re.compile(r'([a-zA-Z0-9])([.(),:;!?\-])( |$)')
 time_re = re.compile(r"(\d):(\d+):(\d+)")
 english_fixes = {
     re.compile(r'(\w+)\.([a-zA-Z]+)'): r'\1 dot \2',
@@ -373,8 +373,6 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         _eloquence.process()
 
     def xspeakText(self,text, should_pause=False):
-        # Presumably dashes are handled as symbols by NVDA symbol processing, so strip extra ones to avoid too many dashes.
-        text = text.replace("-", " ")
         if _eloquence.params[9] == 65536 or _eloquence.params[9] == 65537: text = resub(english_fixes, text)
         if _eloquence.params[9] == 131072 or _eloquence.params[9] == 131073: text = resub(spanish_fixes, text)
         if _eloquence.params[9] in (196609, 196608): text = resub(french_fixes, text)
