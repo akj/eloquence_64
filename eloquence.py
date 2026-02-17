@@ -2,6 +2,7 @@
 # synthDrivers/eci.py
 # todo: possibly add to this
 import speech, tones, gui, wx
+import ctypes, winsound, shutil # Added for Copy Helper tool
 
 try:
     from speech import (
@@ -27,7 +28,7 @@ except ImportError:
     )
 
 try:
-    from driverHandler import NumericDriverSetting, BooleanDriverSetting
+    from driverHandler import NumericDriverSetting, BooleanDriverSetting, DriverSetting
 except ImportError:
     from autoSettingsUtils.driverSetting import (
         BooleanDriverSetting,
@@ -35,8 +36,16 @@ except ImportError:
         NumericDriverSetting,
     )
 
+try:
+    from autoSettingsUtils.utils import StringParameterInfo
+except ImportError:
+    class StringParameterInfo:
+        def __init__(self, value, label):
+            self.value = value
+            self.label = label
 
-punctuation = ",.?:;"
+
+punctuation = ",.?:;)(?!" 
 punctuation = [x for x in punctuation]
 from ctypes import *
 import ctypes.wintypes
@@ -58,7 +67,7 @@ log = logging.getLogger(__name__)
 
 minRate = 40
 maxRate = 150
-pause_re = re.compile(r"([a-zA-Z0-9])([.(),:;!?\-])( |$)")
+pause_re = re.compile(r"([a-zA-Z0-9]|\s)([,.:;?!)])(\2*?)(\s|[\\/]|$|$)")
 time_re = re.compile(r"(\d):(\d+):(\d+)")
 english_fixes = {
     re.compile(r"(\w+)\.([a-zA-Z]+)"): r"\1 dot \2",
@@ -173,29 +182,283 @@ def resub(dct, s):
 
 
 class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
-    title = _("Eloquence Dictionaries")
+    title = _("Eloquence")
 
     def makeSettings(self, settings):
-        sHelper = gui.guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
+        try:
+            sHelper = gui.guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
 
-        self.dictionarySources = {
-            "https://github.com/mohamed00/AltIBMTTSDictionaries": "Alternative IBM TTS Dictionaries",
-            "https://github.com/eigencrow/IBMTTSDictionaries": "IBM TTS Dictionaries",
-        }
+            self.dictionarySources = {
+                "https://github.com/mohamed00/AltIBMTTSDictionaries": "Alternative IBM TTS Dictionaries",
+                "https://github.com/eigencrow/IBMTTSDictionaries": "IBM TTS Dictionaries",
+            }
 
-        self.dictionaryChoice = sHelper.addLabeledControl(
-            _("Dictionary:"), wx.Choice, choices=list(self.dictionarySources.values())
-        )
-        self.dictionaryChoice.SetStringSelection(
-            config.conf.get("eloquence", {}).get(
-                "dictionary_name", "Alternative IBM TTS Dictionaries"
+            self.dictionaryChoice = sHelper.addLabeledControl(
+                _("Dictionary:"), wx.Choice, choices=list(self.dictionarySources.values())
             )
+            self.dictionaryChoice.SetStringSelection(
+                config.conf.get("eloquence", {}).get(
+                    "dictionary_name", "Alternative IBM TTS Dictionaries"
+                )
+            )
+
+            self.updateButton = sHelper.addItem(
+                wx.Button(self, label=_("Check for updates"))
+            )
+            self.Bind(wx.EVT_BUTTON, self.onUpdate, self.updateButton)
+
+            # Tool to automate copying eloquence_host32.exe for 64-bit NVDA secure screens
+            self.copyHelperButton = sHelper.addItem(
+                wx.Button(
+                    self, label=_("Copy Helper to System Config (for Logon Screen)")
+                )
+            )
+            self.Bind(wx.EVT_BUTTON, self.onCopyHelper, self.copyHelperButton)
+
+            # NEW: Auto-update addon button
+            self.addonUpdateButton = sHelper.addItem(
+                wx.Button(self, label=_("Check for Add-on Updates"))
+            )
+            self.Bind(wx.EVT_BUTTON, self.onCheckAddonUpdate, self.addonUpdateButton)
+        except Exception as e:
+            log.error(f"Error creating Eloquence settings panel: {e}")
+            # Panel creation failed, but don't crash - synth will still work
+
+    def onCopyHelper(self, evt):
+        """Copies eloquence_host32.exe with UAC elevation support and definitive feedback."""
+        source_file = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "eloquence_host32.exe")
+        )
+        prog_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+        target_addon_dir = os.path.normpath(
+            os.path.join(prog_files, "NVDA", "systemConfig", "addons", "Eloquence")
         )
 
-        self.updateButton = sHelper.addItem(
-            wx.Button(self, label=_("Check for updates"))
+        # Security check: Ensure the target addon directory exists in systemConfig
+        if not os.path.isdir(target_addon_dir):
+            wx.MessageBox(
+                _(
+                    "Eloquence folder not found in systemConfig.\n\nPlease go to NVDA Settings > General and click 'Use currently saved settings during sign-in' first to initialize folders."
+                ),
+                _("Folder Missing"),
+                wx.OK | wx.ICON_WARNING,
+            )
+            return
+
+        dest_dir = os.path.normpath(os.path.join(target_addon_dir, "synthDrivers"))
+        dest_file = os.path.normpath(os.path.join(dest_dir, "eloquence_host32.exe"))
+
+        if not os.path.exists(source_file):
+            wx.MessageBox(
+                _(f"Source file not found at:\n{source_file}"),
+                _("Error"),
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        # Prepare elevated command: ensure subdirectory exists and copy the helper
+        cmd_params = (
+            f'/c mkdir "{dest_dir}" 2>nul & copy /y "{source_file}" "{dest_file}"'
         )
-        self.Bind(wx.EVT_BUTTON, self.onUpdate, self.updateButton)
+
+        try:
+            # Triggering UAC Elevation using ShellExecuteW's "runas" verb
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", "cmd.exe", cmd_params, None, 0
+            )
+
+            if ret > 32:
+                # Play Windows Asterisk sound for confirmation of successful launch
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                wx.MessageBox(
+                    _(
+                        "Successfully copied eloquence_host32.exe to systemConfig!\n\nEloquence should now load normally on logon screen, start-up, and other secure screens."
+                    ),
+                    _("Success"),
+                    wx.OK | wx.ICON_INFORMATION,
+                )
+            elif ret == 5:
+                # SE_ERR_ACCESSDENIED: Elevation prompt was declined
+                wx.MessageBox(
+                    _(
+                        "Copy process was cancelled or permission was denied by the user."
+                    ),
+                    _("Cancelled"),
+                    wx.OK | wx.ICON_ERROR,
+                )
+            else:
+                wx.MessageBox(
+                    _(
+                        f"An error occurred while attempting to copy the file. (Error Code: {ret})"
+                    ),
+                    _("Error"),
+                    wx.OK | wx.ICON_ERROR,
+                )
+        except Exception as e:
+            wx.MessageBox(
+                _(f"An unexpected error occurred: {str(e)}"),
+                _("Error"),
+                wx.OK | wx.ICON_ERROR,
+            )
+
+    def onCheckAddonUpdate(self, evt):
+        """Check for and apply addon updates from GitHub"""
+        import sys
+        import os
+
+        # Import the update manager
+        addon_dir = os.path.abspath(os.path.dirname(__file__))
+        update_manager_path = os.path.join(addon_dir, "eloquence_updater.py")
+
+        # Check if updater exists
+        if not os.path.exists(update_manager_path):
+            wx.MessageBox(
+                _("Update manager not found. Please reinstall the add-on."),
+                _("Error"),
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        # Import update manager
+        sys.path.insert(0, addon_dir)
+        try:
+            from eloquence_updater import EloquenceUpdateManager, show_update_dialog
+        except ImportError as e:
+            wx.MessageBox(
+                _(f"Failed to load update manager: {e}"),
+                _("Error"),
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+        finally:
+            if addon_dir in sys.path:
+                sys.path.remove(addon_dir)
+
+        # Create progress dialog
+        progress = wx.ProgressDialog(
+            _("Checking for Updates"),
+            _("Connecting to GitHub..."),
+            maximum=100,
+            parent=self,
+            style=wx.PD_APP_MODAL | wx.PD_AUTO_HIDE,
+        )
+
+        try:
+            # Initialize update manager
+            manager = EloquenceUpdateManager(addon_dir)
+
+            # Check for updates
+            progress.Update(10, _("Checking for updates..."))
+            (
+                has_update,
+                latest_version,
+                download_url,
+                changelog,
+            ) = manager.check_for_updates()
+
+            if not has_update:
+                progress.Update(100, _("No updates available"))
+                progress.Destroy()
+                wx.MessageBox(
+                    _("You are using the latest version!"),
+                    _("Up to Date"),
+                    wx.OK | wx.ICON_INFORMATION,
+                )
+                return
+
+            # Show changelog
+            progress.Update(20, _("Update available!"))
+            progress.Destroy()
+
+            changelog_dialog = wx.MessageDialog(
+                self,
+                _(
+                    f"New version available: {latest_version}\n\n"
+                    f"Current version: {manager.CURRENT_VERSION}\n\n"
+                    f"Changelog:\n{changelog[:500]}\n\n"
+                    f"Would you like to download and review the update?"
+                ),
+                _("Update Available"),
+                wx.YES_NO | wx.ICON_INFORMATION,
+            )
+
+            if changelog_dialog.ShowModal() != wx.ID_YES:
+                return
+
+            # Download update
+            progress = wx.ProgressDialog(
+                _("Downloading Update"),
+                _("Downloading..."),
+                maximum=100,
+                parent=self,
+                style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT,
+            )
+
+            def download_progress(percent, message):
+                cont, skip = progress.Update(percent, message)
+                return cont
+
+            zip_path = manager.download_update(download_url, download_progress)
+
+            # Extract update
+            progress.Update(0, _("Extracting update..."))
+            manager.extract_update(zip_path, download_progress)
+
+            # Analyze changes
+            progress.Update(0, _("Analyzing changes..."))
+            changes = manager.analyze_changes(download_progress)
+
+            progress.Destroy()
+
+            # Show update dialog with detailed changes
+            apply_update, decisions = show_update_dialog(self, changes, latest_version)
+
+            if not apply_update:
+                manager.cleanup()
+                wx.MessageBox(
+                    _("Update cancelled."), _("Cancelled"), wx.OK | wx.ICON_INFORMATION
+                )
+                return
+
+            # Apply update with progress
+            progress = wx.ProgressDialog(
+                _("Applying Update"),
+                _("Please wait..."),
+                maximum=100,
+                parent=self,
+                style=wx.PD_APP_MODAL | wx.PD_AUTO_HIDE,
+            )
+
+            def merge_progress(percent, message):
+                progress.Update(percent, message)
+
+            manager.smart_merge(changes, decisions, merge_progress)
+
+            progress.Destroy()
+
+            # Success!
+            wx.MessageBox(
+                _(
+                    f"Update to {latest_version} applied successfully!\n\n"
+                    f"Please restart NVDA for changes to take effect."
+                ),
+                _("Update Successful"),
+                wx.OK | wx.ICON_INFORMATION,
+            )
+
+            # Cleanup
+            manager.cleanup()
+
+        except Exception as e:
+            progress.Destroy()
+            log.error(f"Update failed: {e}")
+            wx.MessageBox(
+                _(
+                    f"Update failed: {str(e)}\n\n" f"Your addon has not been modified."
+                ),
+                _("Update Failed"),
+                wx.OK | wx.ICON_ERROR,
+            )
 
     def onSave(self):
         if "eloquence" not in config.conf:
@@ -211,7 +474,7 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
         import urllib.request, zipfile, os, shutil, globalPluginHandler
         from scriptHandler import script
 
-        self.onSave
+        self.onSave()
         dictionary_url = config.conf.get("eloquence", {}).get("dictionary_url")
         if not dictionary_url:
             wx.MessageBox(
@@ -225,37 +488,213 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
             zip_path, _ = urllib.request.urlretrieve(zip_url)
 
             addon_dir = os.path.abspath(os.path.dirname(__file__))
+            dest_folder = os.path.join(addon_dir, "eloquence")
+
+            if not os.path.exists(dest_folder):
+                os.makedirs(dest_folder)
 
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(addon_dir)
+                zip_contents = zip_ref.namelist()
+                extracted_root_name = zip_contents[0].split("/")[0]
+                extracted_folder_path = os.path.join(addon_dir, extracted_root_name)
 
-            # Find the extracted folder
-            extracted_folder_name = os.path.basename(dictionary_url) + "-master"
-            extracted_folder_path = os.path.join(addon_dir, extracted_folder_name)
+            updates_count = 0
 
-            # Find the .dic files in the extracted folder
-            for root, dirs, files in os.walk(extracted_folder_path):
-                for file in files:
-                    if file.endswith(".dic"):
-                        # Copy the .dic file to the synthDrivers/eloquence folder
-                        dest_folder = os.path.join(addon_dir, "eloquence")
-                        if not os.path.exists(dest_folder):
-                            os.makedirs(dest_folder)
-                        os.replace(
-                            os.path.join(root, file), os.path.join(dest_folder, file)
-                        )
+            # --- HELPER: Strip accents to ensure pure ASCII ---
+            def clean_key_text(text):
+                # Normalize unicode to decompose characters (NFD)
+                # Then filter out non-spacing mark characters (accents)
+                return "".join(
+                    c
+                    for c in unicodedata.normalize("NFD", text)
+                    if unicodedata.category(c) != "Mn"
+                )
 
-            # Clean up the downloaded zip file and extracted folder
+            # --- HELPER: Extract Key/Word only (Cleaned) ---
+            def get_key(line):
+                parts = line.strip().split(None, 1)
+                if parts:
+                    raw_key = parts[0].lower()
+                    return clean_key_text(raw_key)  # Return sanitized key (e.g., 'protegee')
+                return None
+
+            # --- HELPER: Normalize Format (Space to Tab + Clean ALL text) ---
+            def normalize_entry_format(line):
+                line = line.strip()
+                if " [" in line and "\t[" not in line:
+                    parts = line.split(" [", 1)
+                    if len(parts) == 2:
+                        word_part = parts[0].strip()
+                        pronunciation_part = parts[1]
+                        # Clean BOTH the word and pronunciation to remove ALL accents
+                        clean_word = clean_key_text(word_part)
+                        clean_pronunciation = clean_key_text(pronunciation_part)
+                        return f"{clean_word}\t[{clean_pronunciation}"
+
+                # Even if it's already tabbed, ensure ALL text is accent-free
+                if "\t[" in line:
+                    parts = line.split("\t[", 1)
+                    if len(parts) == 2:
+                        word_part = parts[0].strip()
+                        pronunciation_part = parts[1]
+                        # Clean BOTH parts
+                        clean_word = clean_key_text(word_part)
+                        clean_pronunciation = clean_key_text(pronunciation_part)
+                        return f"{clean_word}\t[{clean_pronunciation}"
+
+                # If no bracket format, just clean the whole line
+                return clean_key_text(line)
+
+            # --- MAIN LOGIC ---
+            if os.path.exists(extracted_folder_path):
+
+                candidates = []
+                for root, dirs, files in os.walk(extracted_folder_path):
+                    for f in files:
+                        if f.lower().endswith(".dic"):
+                            full_path = os.path.join(root, f)
+                            candidates.append((full_path, f))
+
+                processed_filenames = set()
+                encodings_to_try = ["utf-8", "cp1252", "iso-8859-1", "cp437"]
+
+                for source_path, filename in candidates:
+                    dest_path = os.path.join(dest_folder, filename)
+
+                    # Auto-create new dictionary files with accent stripping (pure ASCII)
+                    if not os.path.exists(dest_path):
+                        try:
+                            # Read source file with encoding detection
+                            source_lines = []
+                            read_success = False
+                            for enc in encodings_to_try:
+                                try:
+                                    with open(source_path, "r", encoding=enc) as f:
+                                        source_lines = f.readlines()
+                                        read_success = True
+                                        break
+                                except UnicodeDecodeError:
+                                    continue
+
+                            if not read_success:
+                                with open(
+                                    source_path, "r", encoding="iso-8859-1", errors="replace"
+                                ) as f:
+                                    source_lines = f.readlines()
+
+                            # Process and strip accents from all lines
+                            processed_lines = []
+                            for line in source_lines:
+                                normalized_line = normalize_entry_format(line)
+                                if normalized_line.strip():  # Skip empty lines
+                                    processed_lines.append(normalized_line)
+
+                            # Write as pure ASCII
+                            with open(dest_path, "w", encoding="utf-8") as f:
+                                for line in processed_lines:
+                                    f.write(f"{line}\n")
+
+                            updates_count += len(processed_lines)
+                            log.info(
+                                f"Created new dictionary file: {filename} ({len(processed_lines)} entries, accents stripped)"
+                            )
+                        except Exception as e:
+                            log.error(f"Failed to create new dictionary {filename}: {e}")
+                        continue
+
+                    if filename.lower() in processed_filenames:
+                        continue
+                    processed_filenames.add(filename.lower())
+
+                    lines_to_append = []
+                    try:
+                        # 1. READ LOCAL: Extract CLEAN KEYS
+                        existing_keys = set()
+
+                        def load_local_keys(f_handle):
+                            for line in f_handle:
+                                key = get_key(line)
+                                if key:
+                                    existing_keys.add(key)
+
+                        try:
+                            with open(dest_path, "r", encoding="utf-8") as f:
+                                load_local_keys(f)
+                        except UnicodeDecodeError:
+                            with open(
+                                dest_path, "r", encoding="mbcs", errors="ignore"
+                            ) as f:
+                                load_local_keys(f)
+
+                        # 2. READ SOURCE WITH AUTO-DETECT
+                        source_lines = []
+                        read_success = False
+                        for enc in encodings_to_try:
+                            try:
+                                with open(source_path, "r", encoding=enc) as f:
+                                    source_lines = f.readlines()
+                                    read_success = True
+                                    break
+                            except UnicodeDecodeError:
+                                continue
+
+                        if not read_success:
+                            with open(
+                                source_path, "r", encoding="iso-8859-1", errors="replace"
+                            ) as f:
+                                source_lines = f.readlines()
+
+                        # 3. FILTER, CLEAN, & FORMAT
+                        for line in source_lines:
+                            # This cleans the visual word (protégée -> protegee) AND normalizes spaces
+                            normalized_line = normalize_entry_format(line)
+
+                            # Extract the clean key for comparison
+                            key = get_key(normalized_line)
+
+                            if not key:
+                                continue
+
+                            # Check duplicates using the CLEANED key
+                            if key not in existing_keys:
+                                lines_to_append.append(normalized_line)
+                                existing_keys.add(key)
+
+                        # 4. WRITE UPDATES (Strictly UTF-8)
+                        if lines_to_append:
+                            with open(dest_path, "a", encoding="utf-8") as f:
+                                f.write("\n")
+                                for item in lines_to_append:
+                                    f.write(f"{item}\n")
+                            updates_count += len(lines_to_append)
+
+                    except Exception as e:
+                        log.error(f"Failed to merge dictionary {filename}: {e}")
+
+                shutil.rmtree(extracted_folder_path)
+
             os.remove(zip_path)
-            shutil.rmtree(
-                extracted_folder_path
-            )  # a command to remove a folder in python.
 
-            wx.MessageBox(
-                "Dictionary updated successfully. Please reload your Eloquence synthesizer or restart NVDA for the changes to take effect.",
-                "Success",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+            if updates_count > 0:
+                # Count how many were new files vs updated entries
+                new_files = sum(
+                    1 for f in os.listdir(dest_folder) if f.lower().endswith(".dic")
+                )
+                wx.MessageBox(
+                    f"Dictionary update successful!\n\n"
+                    f"• Total updates: {updates_count}\n"
+                    f"• Dictionary files: {new_files}\n\n"
+                    f"Note: All accents have been stripped for compatibility.",
+                    "Success",
+                    wx.OK | wx.ICON_INFORMATION,
+                )
+            else:
+                wx.MessageBox(
+                    "No new updates found. Your dictionaries are already up to date.",
+                    "Eloquence",
+                    wx.OK | wx.ICON_INFORMATION,
+                )
 
         except Exception as e:
             wx.MessageBox(
@@ -263,7 +702,6 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
                 "Error",
                 wx.OK | wx.ICON_ERROR,
             )
-        # To be implemented
         pass
 
 
@@ -284,6 +722,7 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         ),
         BooleanDriverSetting("ABRDICT", "Enable &abbreviation dictionary", False),
         BooleanDriverSetting("phrasePrediction", "Enable phrase prediction", False),
+        DriverSetting("pauseMode", "Pauses", defaultVal="0"),
     )
     supportedCommands = {
         IndexCommand,
@@ -305,42 +744,108 @@ class SynthDriver(synthDriverHandler.SynthDriver):
     description = "ETI-Eloquence"
     name = "eloquence"
 
+    # Initialize _pause_mode at class level to prevent issues with setting restoration
+    _pause_mode = 0
+
     @classmethod
     def check(cls):
-        return _eloquence.eciCheck()
+        try:
+            log.info("Eloquence: Running check() to verify synth is available")
+            result = _eloquence.eciCheck()
+            log.info(f"Eloquence: check() returned {result}")
+            return result
+        except Exception as e:
+            log.error(f"Eloquence: check() failed with error: {e}", exc_info=True)
+            return False
 
     def __init__(self):
-        gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
-            EloquenceSettingsPanel
-        )
-        _eloquence.initialize(self._onIndexReached)
-        voice_param = _eloquence.params.get(9)
-        if voice_param is None:
-            configured_voice = (
-                config.conf.get("speech", {}).get("eci", {}).get("voice", "enu")
+        # Safe settings panel registration - won't crash if API changes in different NVDA versions
+        try:
+            if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
+                if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
+                    if (
+                        EloquenceSettingsPanel
+                        not in gui.settingsDialogs.NVDASettingsDialog.categoryClasses
+                    ):
+                        gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
+                            EloquenceSettingsPanel
+                        )
+        except Exception as e:
+            log.warning(f"Could not register Eloquence settings panel: {e}")
+            # Continue initialization - synth will work without settings panel
+
+        try:
+            log.info("Eloquence: Starting initialization")
+            _eloquence.initialize(self._onIndexReached)
+            log.info("Eloquence: _eloquence.initialize completed successfully")
+        except Exception as e:
+            log.error(
+                f"Eloquence: Failed to initialize _eloquence module: {e}", exc_info=True
             )
-            voice_info = _eloquence.langs.get(configured_voice) or _eloquence.langs.get(
-                "enu"
+            raise
+
+        try:
+            voice_param = _eloquence.params.get(9)
+            if voice_param is None:
+                configured_voice = (
+                    config.conf.get("speech", {}).get("eci", {}).get("voice", "enu")
+                )
+                voice_info = _eloquence.langs.get(configured_voice) or _eloquence.langs.get(
+                    "enu"
+                )
+                voice_param = voice_info[0] if voice_info else 65536
+            self._update_voice_state(voice_param, update_default=True)
+            # Initialize _rate first before setting the rate property
+            self._rate = self._percentToParam(50, minRate, maxRate)
+            self.rate = 50
+            self.variant = "1"
+            self._pause_mode = 0
+            log.info("Eloquence: Initialization completed successfully")
+        except Exception as e:
+            log.error(
+                f"Eloquence: Failed during voice/parameter setup: {e}", exc_info=True
             )
-            voice_param = voice_info[0] if voice_info else 65536
-        self._update_voice_state(voice_param, update_default=True)
-        self.rate = 50
-        self.variant = "1"
+            raise
 
     def terminate(self):
+        # Safe settings panel removal - won't crash if it was never registered
         try:
-            gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(
-                EloquenceSettingsPanel
-            )
-        except ValueError:
-            pass
+            if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
+                if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
+                    gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(
+                        EloquenceSettingsPanel
+                    )
+        except (ValueError, AttributeError) as e:
+            log.debug(f"Settings panel already removed or never registered: {e}")
+        except Exception as e:
+            log.warning(f"Error removing Eloquence settings panel: {e}")
+
         super(SynthDriver, self).terminate()
+
+    def combine_adjacent_strings(self, lst):
+        result = []
+        current_string = ""
+        for item in lst:
+            if isinstance(item, str):
+                current_string += item
+            else:
+                if current_string:
+                    result.append(current_string)
+                    current_string = ""
+                result.append(item)
+        if current_string:
+            result.append(current_string)
+        return result
 
     def speak(self, speechSequence):
         last = None
         outlist = []
         pending_indexes = []
         queued_speech = False
+
+        # IBMTTS Logic: Combine strings before processing regex
+        speechSequence = self.combine_adjacent_strings(speechSequence)
+
         for item in speechSequence:
             if isinstance(item, str):
                 s = str(item)
@@ -435,8 +940,14 @@ class SynthDriver(synthDriverHandler.SynthDriver):
                 synthIndexReached.notify(synth=self, index=index)
             synthDoneSpeaking.notify(synth=self)
             return
+
+        # Trailing Pause Logic from IBMTTS:
         if last is not None and not last.rstrip()[-1] in punctuation:
-            outlist.append((_eloquence.speak, ("`p1.",)))
+            # Mode 0 uses p0 for legacy speed performance
+            # Mode 1 and 2 use p1 for standard modern speed
+            p_val = "0" if self._pause_mode == 0 else "1"
+            outlist.append((_eloquence.speak, (f"`p{p_val} ",)))
+
         outlist.append((_eloquence.index, (0xFFFF,)))
         outlist.append((_eloquence.synth, ()))
         seq = _eloquence._client._sequence
@@ -444,6 +955,7 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         _eloquence.process()
 
     def xspeakText(self, text, should_pause=False):
+        text = text.replace("-", " ")
         if _eloquence.params[9] == 65536 or _eloquence.params[9] == 65537:
             text = resub(english_fixes, text)
         if _eloquence.params[9] == 131072 or _eloquence.params[9] == 131073:
@@ -467,7 +979,15 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             self.getVParam(_eloquence.vlm),
             text,
         )  # no embedded commands
-        text = pause_re.sub(r"\1 `p1\2\3", text)
+
+        # IBMTTS Regex Injection Logic for dynamic pausing:
+        if self._pause_mode == 0:
+            # Mode 0 (Do not shorten) maps punctuation to p0 for legacy snappy performance.
+            text = pause_re.sub(r"\1 `p0\2\3\4", text)
+        elif self._pause_mode == 2:
+            # Mode 2 (Shorten all pauses) maps punctuation to p1 for consistent modern shortening.
+            text = pause_re.sub(r"\1 `p1\2\3\4", text)
+
         text = time_re.sub(r"\1:\2 \3", text)
         if self._ABRDICT:
             text = "`da1 " + text
@@ -479,7 +999,8 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             text = "`pp0 " + text
         # if two strings are sent separately, pause between them. This might fix some of the audio issues we're having.
         if should_pause:
-            text = text + " `p1."
+            p_val = "0" if self._pause_mode == 0 else "1"
+            text = text + f" `p{p_val}."
         return text
         #  _eloquence.speak(text, index)
 
@@ -489,6 +1010,25 @@ class SynthDriver(synthDriverHandler.SynthDriver):
     def pause(self, switch):
         _eloquence.pause(switch)
         #  self.dll.eciPause(self.handle,switch)
+
+    # Pause Mode Definitions:
+    # 0: Injects p0 at all punctuation for Legacy Speed.
+    # 1: Standard timing with a p1 pause at the end of speech blocks only.
+    # 2: Injects p1 at all punctuation for consistent Modern Shortening.
+    _pauseModes = {
+        "0": StringParameterInfo("0", "Do not shorten"),
+        "1": StringParameterInfo("1", "Shorten at end only"),
+        "2": StringParameterInfo("2", "Shorten all pauses"),
+    }
+
+    def _get_availablePausemodes(self):
+        return self._pauseModes
+
+    def _set_pauseMode(self, val):
+        self._pause_mode = int(val)
+
+    def _get_pauseMode(self):
+        return str(self._pause_mode)
 
     _backquoteVoiceTags = False
     _ABRDICT = False
@@ -529,7 +1069,6 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         return self.getVParam(_eloquence.pitch)
 
     def _set_pitch(self, vl):
-        log.warning("DIAG _set_pitch: vl=%r (stored as base pitch)", vl)
         self.setVParam(_eloquence.pitch, vl)
 
     def _get_volume(self):
