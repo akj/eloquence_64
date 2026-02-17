@@ -1,10 +1,12 @@
 """Client side helper for communicating with the 32-bit Eloquence host."""
+
 from __future__ import annotations
 
 import itertools
 import logging
 import os
-import sys 
+import sys
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "eloquence"))
 import queue
 import shlex
@@ -32,7 +34,12 @@ class AudioWorker(threading.Thread):
     _BITS_PER_SAMPLE = 16
     _SAMPLE_RATE = 11025
 
-    def __init__(self, player: nvwave.WavePlayer, queue: "queue.Queue[Optional[AudioChunk]]", client: "EloquenceHostClient"):
+    def __init__(
+        self,
+        player: nvwave.WavePlayer,
+        queue: "queue.Queue[Optional[AudioChunk]]",
+        client: "EloquenceHostClient",
+    ):
         super().__init__(daemon=True)
         self._player = player
         self._queue = queue
@@ -64,6 +71,7 @@ class AudioWorker(threading.Thread):
                 continue
             on_done = None
             if index is not None:
+
                 def _callback(i=index):
                     self._invoke_index_callback(i)
 
@@ -99,9 +107,24 @@ class AudioWorker(threading.Thread):
                 LOGGER.exception("Index callback failed")
             if is_final:
                 self._schedule_idle()
+
         return _on_done
 
+    def _schedule_idle(self) -> None:
+        """Signal the player that playback is complete."""
+        try:
+            with self._player_lock:
+                if not self._stopping and self._player:
+                    self._player.idle()
+        except Exception:
+            LOGGER.exception("WavePlayer idle failed")
+        if not self._stopping:
+            self._invoke_index_callback(None)
+
     def _invoke_index_callback(self, value: Optional[int]) -> None:
+        global lastindex
+        if value is not None:
+            lastindex = value
         if onIndexReached:
             try:
                 onIndexReached(value)
@@ -110,6 +133,7 @@ class AudioWorker(threading.Thread):
 
 
 AudioChunk = Tuple[bytes, Optional[int], bool, int]
+
 
 # RPC client ---------------------------------------------------------------------
 @dataclass
@@ -146,7 +170,16 @@ class EloquenceHostClient:
         address = listener.address
         port = address[1]
         cmd = list(self._resolve_host_executable(addon_dir))
-        cmd.extend(["--address", f"127.0.0.1:{port}", "--authkey", authkey.hex(), "--log-dir", addon_dir])
+        cmd.extend(
+            [
+                "--address",
+                f"127.0.0.1:{port}",
+                "--authkey",
+                authkey.hex(),
+                "--log-dir",
+                addon_dir,
+            ]
+        )
         LOGGER.info("Launching Eloquence host: %s", cmd)
         proc = subprocess.Popen(cmd, cwd=addon_dir)
         conn = listener.accept()
@@ -243,7 +276,14 @@ class EloquenceHostClient:
             event = threading.Event()
             self._pending[msg_id] = event
             try:
-                self._host.connection.send({"type": "command", "id": msg_id, "command": command, "payload": payload})
+                self._host.connection.send(
+                    {
+                        "type": "command",
+                        "id": msg_id,
+                        "command": command,
+                        "payload": payload,
+                    }
+                )
             except Exception:
                 # Clean up if send fails
                 self._pending.pop(msg_id, None)
@@ -317,57 +357,76 @@ _client = EloquenceHostClient()
 synth_queue = queue.Queue()
 params: Dict[int, int] = {}
 voice_params: Dict[int, int] = {}
+lastindex: Optional[int] = None
+onIndexReached = None
 _synth_worker: Optional[threading.Thread] = None
 _synth_worker_lock = threading.Lock()
 _synth_worker_stop = threading.Event()
 
 
 # Public API ---------------------------------------------------------------------
-hsz=1; pitch=2; fluctuation=3; rgh=4; bth=5; rate=6; vlm=7
-eciPath = os.path.abspath(os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll"))
-langs={'esm': (131073, 'Latin American Spanish'),
-'esp': (131072, 'Castilian Spanish'),
-'ptb': (458752, 'Brazilian Portuguese'),
-'frc': (196609, 'French Canadian'),
-'fra': (196608, 'French'),
-'fin': (589824, 'Finnish'),
-'deu': (262144, 'German'),
-'ita': (327680, 'Italian'),
-'enu': (65536, 'American English'),
-'eng': (65537, 'British English'),
-'chs': (393216, 'Mandarin Chinese'),  # 0x00060000
-'jpn': (524288, 'Japanese'),  # 0x00080000
-'kor': (655360, 'Korean')}  # 0x000A0000
+hsz = 1
+pitch = 2
+fluctuation = 3
+rgh = 4
+bth = 5
+rate = 6
+vlm = 7
+eciPath = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll")
+)
+langs = {
+    "esm": (131073, "Latin American Spanish"),
+    "esp": (131072, "Castilian Spanish"),
+    "ptb": (458752, "Brazilian Portuguese"),
+    "frc": (196609, "French Canadian"),
+    "fra": (196608, "French"),
+    "fin": (589824, "Finnish"),
+    "deu": (262144, "German"),
+    "ita": (327680, "Italian"),
+    "enu": (65536, "American English"),
+    "eng": (65537, "British English"),
+    "chs": (393216, "Mandarin Chinese"),  # 0x00060000
+    "jpn": (524288, "Japanese"),  # 0x00080000
+    "kor": (655360, "Korean"),
+}  # 0x000A0000
 
 # Language to encoding mapping for Asian languages
 # Using same codecs as IBMTTS which works correctly
 LANG_ENCODINGS = {
-    'chs': 'gb18030',  # Mandarin Chinese
-    'jpn': 'cp932',    # Japanese (Shift-JIS compatible)
-    'kor': 'cp949',    # Korean
+    "chs": "gb18030",  # Mandarin Chinese
+    "jpn": "cp932",  # Japanese (Shift-JIS compatible)
+    "kor": "cp949",  # Korean
 }
 
 # Voice ID to language code mapping (inverse of langs)
 VOICE_ID_TO_LANG = {voice_id: lang_code for lang_code, (voice_id, _) in langs.items()}
 
 # Current language code (updated when voice is set)
-_current_lang = 'enu'
-    
+_current_lang = "enu"
+
+
 def initialize(indexCallback=None):
     global onIndexReached, _current_lang
     _client.ensure_started()
     _client.initialize_audio()
     _ensure_synth_worker()
     onIndexReached = indexCallback
-    eci_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll"))
+    eci_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll")
+    )
     voice_conf = config.conf.get("speech", {}).get("eci", {})
     _current_lang = voice_conf.get("voice", "enu")
     payload = {
         "eciPath": eci_path,
         "dataDirectory": os.path.join(os.path.dirname(eci_path)),
         "language": _current_lang,
-        "enableAbbreviationDict": config.conf.get("speech", {}).get("eci", {}).get("ABRDICT", False),
-        "enablePhrasePrediction": config.conf.get("speech", {}).get("eci", {}).get("phrasePrediction", False),
+        "enableAbbreviationDict": config.conf.get("speech", {})
+        .get("eci", {})
+        .get("ABRDICT", False),
+        "enablePhrasePrediction": config.conf.get("speech", {})
+        .get("eci", {})
+        .get("phrasePrediction", False),
         "voiceVariant": int(voice_conf.get("variant", 0) or 0),
     }
     response = _client.send_command("initialize", **payload)
@@ -379,7 +438,7 @@ def speak(text):
     try:
         # Use appropriate encoding for Asian languages
         encoding = LANG_ENCODINGS.get(_current_lang, "mbcs")
-        text_bytes = text.encode(encoding, errors='replace')
+        text_bytes = text.encode(encoding, errors="replace")
         _client.send_command("addText", text=text_bytes)
     except Exception:
         LOGGER.exception("Failed to send text to synthesizer")
@@ -392,13 +451,20 @@ def index(idx):
         LOGGER.exception("Failed to insert index")
 
 
-def cmdProsody(param, multiplier):
-    value = voice_params.get(param, 0)
-    if multiplier is not None:
-        new_value = int(value * multiplier)
-    else:
-        new_value = value
-    setVParam(param, new_value, temporary=True)
+def cmdProsody(pr, multiplier, offset=0):
+    """Apply a prosody change using the current base value from voice_params.
+
+    Called at synthesis time so voice_params[pr] reflects the latest base.
+    Computes: value = base * multiplier + offset
+    For caps pitch: NVDA sends multiplier=1, offset=30 (or similar).
+    For revert: NVDA sends multiplier=1, offset=0.
+    Uses temporary=True so voice_params is never corrupted.
+    """
+    base = getVParam(pr)
+    value = int(base * multiplier + offset)
+    # Clamp to valid ECI parameter range (0-100).
+    value = max(0, min(value, 100))
+    setVParam(pr, value, temporary=True)
 
 
 def synth():
@@ -410,7 +476,6 @@ def synth():
 
 def stop():
     _client.stop()
-
 
 
 def pause(switch):
@@ -427,18 +492,41 @@ def set_voice(vl):
     global _current_lang
     try:
         voice_id = int(vl)
+        # Save the user-configured voice params before the language change.
+        # The host re-reads all voice params from the DLL after eciSetParam(9),
+        # but the DLL may still hold temporary prosody values (e.g. elevated
+        # pitch for a capital letter).  If we blindly accept those re-read
+        # values, the temporary pitch becomes the new permanent base and the
+        # pitch never reverts -- the "stuck pitch on language change" bug.
+        saved_vparams = dict(voice_params)
         response = _client.send_command("setParam", paramId=9, value=voice_id)
         params.update(response.get("params", {}))
-        voice_params.update(response.get("voiceParams", {}))
+        # Do NOT update voice_params from the response.  Instead, restore the
+        # user's base values and push them to the DLL so the new language uses
+        # the correct settings, not stuck temporary ones.
+        for pr, val in saved_vparams.items():
+            voice_params[pr] = val
+            try:
+                _client.send_command(
+                    "setVoiceParam",
+                    paramId=int(pr),
+                    value=int(val),
+                    temporary=False,
+                )
+            except Exception:
+                pass
         # Update current language for proper encoding
-        _current_lang = VOICE_ID_TO_LANG.get(voice_id, 'enu')
-        LOGGER.debug("Voice changed to ID %d, language code: %s", voice_id, _current_lang)
+        _current_lang = VOICE_ID_TO_LANG.get(voice_id, "enu")
+        LOGGER.debug(
+            "Voice changed to ID %d, language code: %s", voice_id, _current_lang
+        )
     except Exception:
         LOGGER.exception("Failed to set voice")
 
 
 def getVParam(pr):
-    return voice_params.get(pr, 0)
+    val = voice_params.get(pr, 0)
+    return val
 
 
 def setVParam(pr, vl, temporary=False):
@@ -517,6 +605,7 @@ def _stop_synth_worker() -> None:
 
 
 def eciCheck() -> bool:
-    eci_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll"))
+    eci_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll")
+    )
     return os.path.exists(eci_path)
-
