@@ -964,7 +964,6 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         _eloquence.process()
 
     def xspeakText(self, text, should_pause=False):
-        text = text.replace("-", " ")
         if _eloquence.params[9] == 65536 or _eloquence.params[9] == 65537:
             text = resub(english_fixes, text)
         if _eloquence.params[9] == 131072 or _eloquence.params[9] == 131073:
