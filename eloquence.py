@@ -308,7 +308,7 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 
         # Import the update manager
         addon_dir = os.path.abspath(os.path.dirname(__file__))
-        update_manager_path = os.path.join(addon_dir, "eloquence_updater.py")
+        update_manager_path = os.path.join(addon_dir, "_eloquence_updater.py")
 
         # Check if updater exists
         if not os.path.exists(update_manager_path):
@@ -322,7 +322,7 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
         # Import update manager
         sys.path.insert(0, addon_dir)
         try:
-            from eloquence_updater import EloquenceUpdateManager, show_update_dialog
+            from _eloquence_updater import EloquenceUpdateManager, show_update_dialog
         except ImportError as e:
             wx.MessageBox(
                 _(f"Failed to load update manager: {e}"),
