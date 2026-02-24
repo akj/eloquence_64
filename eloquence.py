@@ -852,6 +852,11 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         pending_indexes = []
         queued_speech = False
 
+        # Reset prosody to baseline at the start of each utterance to prevent
+        # state leaks from previous speech sequences (issue #59).
+        for pr in (_eloquence.rate, _eloquence.pitch, _eloquence.vlm):
+            outlist.append((_eloquence.cmdProsody, (pr, 1, 0)))
+
         # IBMTTS Logic: Combine strings before processing regex
         speechSequence = self.combine_adjacent_strings(speechSequence)
 

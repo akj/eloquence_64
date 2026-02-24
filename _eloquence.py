@@ -372,6 +372,15 @@ rgh = 4
 bth = 5
 rate = 6
 vlm = 7
+PARAM_MAX = {
+    rate: 250,
+    pitch: 100,
+    vlm: 100,
+    hsz: 100,
+    fluctuation: 100,
+    rgh: 100,
+    bth: 100,
+}
 eciPath = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "eloquence", "eci.dll")
 )
@@ -462,8 +471,8 @@ def cmdProsody(pr, multiplier, offset=0):
     """
     base = getVParam(pr)
     value = int(base * multiplier + offset)
-    # Clamp to valid ECI parameter range (0-100).
-    value = max(0, min(value, 100))
+    # Clamp to valid ECI parameter range.
+    value = max(0, min(value, PARAM_MAX.get(pr, 100)))
     setVParam(pr, value, temporary=True)
 
 
