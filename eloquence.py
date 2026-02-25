@@ -186,7 +186,7 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 
     def makeSettings(self, settings):
         try:
-            sHelper = gui.guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
+            sHelper = gui.guiHelper.BoxSizerHelper(self, sizer=settings)
 
             self.dictionarySources = {
                 "https://github.com/mohamed00/AltIBMTTSDictionaries": "Alternative IBM TTS Dictionaries",
