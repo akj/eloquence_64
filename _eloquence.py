@@ -60,27 +60,31 @@ class AudioWorker(threading.Thread):
             if seq < self._client._sequence:
                 self._queue.task_done()
                 continue
-            if not data and index is None:
-                if is_final:
-                    with self._player_lock:
-                        if not self._stopping:
-                            self._player.idle()
-                    if not self._stopping:
-                        self._invoke_index_callback(None)
+            
+            # --- New logic (EARCONS patch) ---
+            if not data:
+                if not self._stopping:
+                    if index is not None:
+                        self._invoke_index_callback(index)
+                    if is_final:
+                        self._schedule_idle()
                 self._queue.task_done()
                 continue
+            # ------------------------------------
+            
             on_done = None
             if index is not None:
-
                 def _callback(i=index):
                     self._invoke_index_callback(i)
-
                 on_done = _callback
+                
             wrapped_on_done = self._make_on_done(on_done, is_final)
+            
             # Early exit if stopping - avoids unnecessary lock acquisition
             if self._stopping:
                 self._queue.task_done()
                 continue
+                
             # Feed directly - blocks if buffer is full
             try:
                 with self._player_lock:
@@ -94,9 +98,22 @@ class AudioWorker(threading.Thread):
             self._queue.task_done()
 
     def stop(self) -> None:
-        self._stopping = True
-        self._running = False
-        self._queue.put(None)
+        if not self._host:
+            return
+        self._sequence += 1
+        
+        # EARCONS patch 1: Instantly stop local audio player first when NVDA stops talking
+        if self._player:
+            try:
+                self._player.stop()
+            except Exception:
+                LOGGER.exception("WavePlayer stop failed")
+                
+        # EARCONS PATCH 2: Send the "stop" command to the host but don't wait for a response (wait=False)
+        try:
+            self.send_command("stop", wait=False)
+        except Exception:
+            pass
 
     def _make_on_done(self, callback, is_final: bool):
         def _on_done() -> None:
@@ -243,9 +260,10 @@ class EloquenceHostClient:
             msg_type = message.get("type")
             if msg_type == "response":
                 msg_id = message["id"]
-                self._responses[msg_id] = message
+                # MEMORY LEAK PATCH: Only save if an event is waiting
                 event = self._pending.pop(msg_id, None)
                 if event:
+                    self._responses[msg_id] = message
                     event.set()
             elif msg_type == "event":
                 self._handle_event(message["event"], message.get("payload", {}))
@@ -268,13 +286,14 @@ class EloquenceHostClient:
             LOGGER.debug("Unhandled host event %s", event)
 
     # ------------------------------------------------------------------
-    def send_command(self, command: str, **payload: Any) -> Dict[str, Any]:
+    def send_command(self, command: str, wait: bool = True, **payload: Any) -> Dict[str, Any]:
         if not self._host:
             raise RuntimeError("Host not started")
         with self._command_lock:
             msg_id = next(self._id_counter)
-            event = threading.Event()
-            self._pending[msg_id] = event
+            event = threading.Event() if wait else None
+            if wait:
+                self._pending[msg_id] = event
             try:
                 self._host.connection.send(
                     {
@@ -284,10 +303,20 @@ class EloquenceHostClient:
                         "payload": payload,
                     }
                 )
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                # Patch for termination errors
+                if wait:
+                    self._pending.pop(msg_id, None)
+                return {}
             except Exception:
-                # Clean up if send fails
-                self._pending.pop(msg_id, None)
+                if wait:
+                    self._pending.pop(msg_id, None)
                 raise
+                
+            # If we are not going to wait for the response (e.g. stop command), return blank immediately
+            if not wait:
+                return {}
+
             # Wait for response with timeout to avoid infinite blocking
             if not event.wait(timeout=5.0):
                 self._pending.pop(msg_id, None)
@@ -297,19 +326,6 @@ class EloquenceHostClient:
             if "error" in response:
                 raise RuntimeError(response["error"])
             return response.get("payload", {})
-
-    def stop(self) -> None:
-        if not self._host:
-            return
-        self._sequence += 1
-        try:
-            self.send_command("stop")
-        finally:
-            if self._player:
-                try:
-                    self._player.stop()
-                except Exception:
-                    LOGGER.exception("WavePlayer stop failed")
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
