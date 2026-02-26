@@ -98,22 +98,9 @@ class AudioWorker(threading.Thread):
             self._queue.task_done()
 
     def stop(self) -> None:
-        if not self._host:
-            return
-        self._sequence += 1
-        
-        # EARCONS patch 1: Instantly stop local audio player first when NVDA stops talking
-        if self._player:
-            try:
-                self._player.stop()
-            except Exception:
-                LOGGER.exception("WavePlayer stop failed")
-                
-        # EARCONS PATCH 2: Send the "stop" command to the host but don't wait for a response (wait=False)
-        try:
-            self.send_command("stop", wait=False)
-        except Exception:
-            pass
+        self._stopping = True
+        self._running = False
+        self._queue.put(None)
 
     def _make_on_done(self, callback, is_final: bool):
         def _on_done() -> None:
@@ -284,6 +271,23 @@ class EloquenceHostClient:
             self._speaking = False
         else:
             LOGGER.debug("Unhandled host event %s", event)
+
+    # ------------------------------------------------------------------
+    def stop(self) -> None:
+        if not self._host:
+            return
+        self._sequence += 1
+        # Stop local audio player immediately
+        if self._player:
+            try:
+                self._player.stop()
+            except Exception:
+                LOGGER.exception("WavePlayer stop failed")
+        # Tell the host to stop without blocking
+        try:
+            self.send_command("stop", wait=False)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def send_command(self, command: str, wait: bool = True, **payload: Any) -> Dict[str, Any]:
