@@ -1,9 +1,8 @@
 [project]
 name = "eloquence-64"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.13-32"
+version = "0.0.0"  # Not used — addon version comes from git tags via buildVars.py
+description = "Eloquence synthesizer for 64-bit NVDA"
+requires-python = ">=3.13"
 dependencies = [
     "pyinstaller>=6.17.0",
 ]
