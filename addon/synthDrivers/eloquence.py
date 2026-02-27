@@ -58,6 +58,7 @@ import os
 import config
 import re
 import logging
+import globalVars
 from synthDriverHandler import (
 	SynthDriver,
 	synthIndexReached,
@@ -670,14 +671,21 @@ class SynthDriver(synthDriverHandler.SynthDriver):
 
 	def __init__(self):
 		# Safe settings panel registration - won't crash if API changes in different NVDA versions
-		try:
-			if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
-				if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
-					if EloquenceSettingsPanel not in gui.settingsDialogs.NVDASettingsDialog.categoryClasses:
-						gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(EloquenceSettingsPanel)
-		except Exception as e:
-			log.warning(f"Could not register Eloquence settings panel: {e}")
-			# Continue initialization - synth will work without settings panel
+		# Skip on secure screens (login, lock, UAC) to prevent exposing dangerous actions as SYSTEM
+		if not globalVars.appArgs.secure:
+			try:
+				if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
+					if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
+						if (
+							EloquenceSettingsPanel
+							not in gui.settingsDialogs.NVDASettingsDialog.categoryClasses
+						):
+							gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
+								EloquenceSettingsPanel
+							)
+			except Exception as e:
+				log.warning(f"Could not register Eloquence settings panel: {e}")
+				# Continue initialization - synth will work without settings panel
 
 		try:
 			log.info("Eloquence: Starting initialization")
@@ -706,14 +714,15 @@ class SynthDriver(synthDriverHandler.SynthDriver):
 
 	def terminate(self):
 		# Safe settings panel removal - won't crash if it was never registered
-		try:
-			if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
-				if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
-					gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(EloquenceSettingsPanel)
-		except (ValueError, AttributeError) as e:
-			log.debug(f"Settings panel already removed or never registered: {e}")
-		except Exception as e:
-			log.warning(f"Error removing Eloquence settings panel: {e}")
+		if not globalVars.appArgs.secure:
+			try:
+				if hasattr(gui.settingsDialogs, "NVDASettingsDialog"):
+					if hasattr(gui.settingsDialogs.NVDASettingsDialog, "categoryClasses"):
+						gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(EloquenceSettingsPanel)
+			except (ValueError, AttributeError) as e:
+				log.debug(f"Settings panel already removed or never registered: {e}")
+			except Exception as e:
+				log.warning(f"Error removing Eloquence settings panel: {e}")
 
 		super(SynthDriver, self).terminate()
 
