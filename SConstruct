@@ -1,3 +1,4 @@
+
 # Eloquence NVDA add-on SConstruct
 # Generates manifest.ini from template + buildVars, then zips addon/ into .nvda-addon.
 
@@ -80,6 +81,33 @@ env.Depends(addon, manifest)
 for p in Path("addon").rglob("*"):
 	if p.is_file():
 		env.Depends(addon, str(p))
+
+# --- Generate POT template --------------------------------------------------
+
+potFile = Path(f"{env['addon_name']}.pot")
+
+# Collect all Python sources inside addon/
+pySources = [str(p) for p in addonDir.rglob("*.py")]
+pySources = [str(p) for p in addonDir.rglob("*.py")]
+pySources.append("buildVars.py")
+
+pot = env.Command(
+	target=str(potFile),
+	source=pySources,
+	action=(
+		"xgettext "
+		"--language=Python "
+		"--keyword=_ "
+		"--keyword=pgettext:1c,2 "
+		"--from-code=UTF-8 "
+		"--package-name=${addon_name} "
+		"--package-version=${addon_version} "
+		"-o $TARGET $SOURCES"
+	),
+)
+
+# Create explicit target: scons pot
+env.Alias("pot", pot)
 
 env.Default(addon)
 env.Clean(addon, [".sconsign.dblite"])

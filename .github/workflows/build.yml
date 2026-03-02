@@ -62,16 +62,20 @@ jobs:
         shell: pwsh
 
       - name: Build addon
-        run: scons
+        run: scons && scons pot
 
-      - name: Upload workflow artifact
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
-          path: "*.nvda-addon"
+          path: |
+            *.nvda-addon
+            *.pot
           archive: false
 
       - name: Upload to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.nvda-addon"
+          files: |
+            *.nvda-addon
+            *.pot
