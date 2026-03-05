@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Eloquence v16\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-03-02 16:27+0000\n"
-"PO-Revision-Date: 2026-03-05 18:39+0100\n"
+"PO-Revision-Date: 2026-03-05 20:03+0100\n"
 "Last-Translator: Karl Eick <hozosch@web.de>\n"
 "Language-Team: \n"
 "Language: de\n"
@@ -160,7 +160,7 @@ msgstr "Suche nach updates..."
 #. Translators: Message of a progress dialog when updating the add-on
 #: addon\synthDrivers\eloquence.py:318
 msgid "No updates available"
-msgstr "Keine Updates vergübar"
+msgstr "Keine Updates verfügbar"
 
 #. Translators: Text of a message dialog when updating the add-on
 #: addon\synthDrivers\eloquence.py:322
@@ -329,7 +329,7 @@ msgstr "&Behauchtheit"
 #. Translators: A synth setting available in speech settings dialog
 #: addon\synthDrivers\eloquence.py:718
 msgid "Enable backquote voice &tags"
-msgstr "Gravis-Sprachtags zulassen"
+msgstr "&Gravis-Sprachtags zulassen"
 
 #. Translators: A synth setting available in speech settings dialog
 #: addon\synthDrivers\eloquence.py:721
