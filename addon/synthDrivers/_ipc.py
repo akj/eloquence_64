@@ -49,8 +49,17 @@ def create_listener() -> socket.socket:
 	return sock
 
 
-def accept_authenticated(listener: socket.socket, authkey: bytes) -> IpcConnection:
-	conn, _ = listener.accept()
+def accept_authenticated(listener: socket.socket, authkey: bytes, timeout: float = 10.0) -> IpcConnection:
+	listener.settimeout(timeout)
+	try:
+		conn, _ = listener.accept()
+	except socket.timeout:
+		raise TimeoutError(
+			f"Eloquence host process did not connect within {timeout}s. "
+			"It may have crashed on startup (e.g. read-only secure screen)."
+		)
+	finally:
+		listener.settimeout(None)
 	_authenticate_server(conn, authkey)
 	conn.settimeout(10.0)  # Receiver thread will get socket.timeout after 10s of silence
 	return IpcConnection(conn)
