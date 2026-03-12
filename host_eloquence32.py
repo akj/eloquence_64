@@ -138,8 +138,16 @@ LOGGER = logging.getLogger("eloquence.host")
 
 def configure_logging(log_dir: Optional[str]) -> None:
 	"""Initialise logging for the helper."""
+	log_file = None
+	if log_dir:
+		log_file = os.path.join(log_dir, "eloquence-host.log")
+		try:
+			with open(log_file, "a"):
+				pass
+		except OSError:
+			log_file = None
 	logging.basicConfig(
-		filename=os.path.join(log_dir, "eloquence-host.log") if log_dir else None,
+		filename=log_file,
 		level=logging.ERROR,
 		format="%(asctime)s %(levelname)s %(message)s",
 	)

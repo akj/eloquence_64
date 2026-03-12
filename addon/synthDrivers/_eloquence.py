@@ -186,7 +186,28 @@ class EloquenceHostClient:
 		)
 		LOGGER.info("Launching Eloquence host: %s", cmd)
 		proc = subprocess.Popen(cmd, cwd=addon_dir)
-		conn = _ipc.accept_authenticated(listener, authkey)
+		try:
+			conn = _ipc.accept_authenticated(listener, authkey)
+		except (TimeoutError, OSError) as exc:
+			LOGGER.error("Eloquence host failed to connect: %s", exc)
+			exit_code = proc.poll()
+			if exit_code is not None:
+				LOGGER.error("Host process already exited with code %s", exit_code)
+			try:
+				proc.terminate()
+				proc.wait(timeout=2)
+			except Exception:
+				try:
+					proc.kill()
+				except Exception:
+					pass
+			try:
+				listener.close()
+			except Exception:
+				pass
+			raise RuntimeError(
+				f"Eloquence host process failed to start: {exc}"
+			) from exc
 		self._host = HostProcess(process=proc, connection=conn, listener=listener)
 		self._receiver = threading.Thread(target=self._receiver_loop, daemon=True)
 		self._receiver.start()
