@@ -343,7 +343,7 @@ msgstr "&Satzvorhersage einschalten"
 
 #. Translators: A synth setting available in speech settings dialog
 #: addon\synthDrivers\eloquence.py:725
-msgid "&Shorten pauses"
+msgid "Shorten &pauses"
 msgstr "&Pausen kürzen"
 
 #. Translators: An option in the "Shorten pauses" combo box in speech settings

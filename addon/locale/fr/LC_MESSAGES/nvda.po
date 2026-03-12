@@ -345,8 +345,8 @@ msgstr "Activer la prédiction de phras&e"
 
 #. Translators: A synth setting available in speech settings dialog
 #: addon\synthDrivers\eloquence.py:725
-msgid "&Shorten pauses"
-msgstr "&Raccourcir les pauses"
+msgid "Shorten &pauses"
+msgstr "Raccourcir les &pauses"
 
 #. Translators: An option in the "Shorten pauses" combo box in speech settings
 #: addon\synthDrivers\eloquence.py:993

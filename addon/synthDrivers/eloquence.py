@@ -726,7 +726,7 @@ class SynthDriver(synthDriverHandler.SynthDriver):
 		# Translators: A synth setting available in speech settings dialog
 		BooleanDriverSetting("phrasePrediction", _("Enable phras&e prediction"), False),
 		# Translators: A synth setting available in speech settings dialog
-		DriverSetting("pauseMode", _("&Shorten pauses"), defaultVal="0"),
+		DriverSetting("pauseMode", _("Shorten &pauses"), defaultVal="0"),
 	)
 	supportedCommands = {
 		IndexCommand,
