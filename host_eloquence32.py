@@ -1,7 +1,7 @@
 """32-bit host process for Eloquence synthesis.
 
 This module is executed as a separate helper process under a 32-bit
-	Python runtime.  It loads the ETI-Eloquence DLL directly and exposes a
+    Python runtime.  It loads the ETI-Eloquence DLL directly and exposes a
 simple RPC protocol over a length-prefixed pickle IPC channel so that
 64-bit NVDA builds can continue to make use of the original synthesizer.
 
@@ -21,7 +21,6 @@ import socket
 import struct
 import sys
 import threading
-import glob
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "eloquence"))
 from dataclasses import dataclass
@@ -133,8 +132,27 @@ LANGS: Dict[str, int] = {
 	"jpn": 524288,  # Japanese (0x00080000)
 	"kor": 655360,  # Korean (0x000A0000)
 }
+LANG_BY_ID: Dict[int, str] = {voice_id: language_code for language_code, voice_id in LANGS.items()}
+DICTIONARY_LANGUAGE_FALLBACKS: Dict[str, tuple[str, ...]] = {
+	"eng": ("enu",),
+	"esm": ("esp",),
+	"frc": ("fra",),
+	"chs": ("enu",),
+}
 
 LOGGER = logging.getLogger("eloquence.host")
+
+
+def get_dictionary_candidates(language_code: str) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+	"""Return main/root/abbreviation dictionary candidates for an Eloquence language."""
+	language_code = (language_code or "enu").lower()
+	language_codes = (language_code, *DICTIONARY_LANGUAGE_FALLBACKS.get(language_code, ()))
+	include_generic = any(code in {"enu", "eng"} for code in language_codes)
+	return (
+		(*(f"{code}main.dic" for code in language_codes), *(("main.dic",) if include_generic else ())),
+		(*(f"{code}root.dic" for code in language_codes), *(("root.dic",) if include_generic else ())),
+		(*(f"{code}abbr.dic" for code in language_codes), *(("abbr.dic",) if include_generic else ())),
+	)
 
 
 def configure_logging(log_dir: Optional[str]) -> None:
@@ -147,13 +165,11 @@ def configure_logging(log_dir: Optional[str]) -> None:
 				pass
 		except OSError:
 			log_file = None
-		logging.basicConfig(
-			filename=log_file,
-			level=logging.ERROR,
-			format="%(asctime)s %(levelname)s %(message)s",
-		)
-
-		LOGGER.setLevel(logging.DEBUG)
+	logging.basicConfig(
+		filename=log_file,
+		level=logging.ERROR,
+		format="%(asctime)s %(levelname)s %(message)s",
+	)
 
 
 @dataclass
@@ -175,6 +191,8 @@ class EloquenceRuntime:
 		self._dll = None  # type: ignore[assignment]
 		self._handle = None  # type: ignore[assignment]
 		self._dictionary_handle = None
+		self._dictionary_handles: Dict[str, object] = {}
+		self._loaded_dictionary_languages: set[str] = set()
 		self._callback = Callback(self._on_callback)
 		self._audio_buffer = BytesIO()
 		self._samples = 3300
@@ -242,8 +260,6 @@ class EloquenceRuntime:
 		result = self._dll.eciSetOutputBuffer(handle, self._samples, self._buffer)
 		if not result:
 			raise RuntimeError("eciSetOutputBuffer failed")
-		self._dictionary_handle = self._dll.eciNewDict(handle)
-		self._dll.eciSetDict(handle, self._dictionary_handle)
 		# Allow annotated input so that backquote commands are interpreted instead of spoken.
 		self._dll.eciSetParam(handle, ECI_INPUT_TYPE, 1)
 		self._params[ECI_INPUT_TYPE] = 1
@@ -263,45 +279,25 @@ class EloquenceRuntime:
 			self._dll.eciSetParam(handle, 41, 1)
 
 	def _load_dictionaries(self) -> None:
-		if not self._dictionary_handle:
-			return
-
+		language_code = (self._config.language_code or "enu").lower()
 		dictionary_dir = get_short_path(self._config.data_directory)
-		lang = self._config.language_code.lower()
+		# LOGGER.debug("Loading dictionaries from %s", dictionary_dir)
+		dictionary_candidates = get_dictionary_candidates(language_code)
+		self._dictionary_handle = self._dictionary_handles.get(language_code)
+		if self._dictionary_handle is None:
+			self._dictionary_handle = self._dll.eciNewDict(self._handle)
+			self._dictionary_handles[language_code] = self._dictionary_handle
 
-		# Definition of categories and their specific candidates
-		# We removed the generic 'root.dic' from the main loop to control it better.
-		categories = (
-			(f"{lang}main.dic", f"{lang.upper()}main.dic"),
-			(f"{lang}root.dic", f"{lang.upper()}root.dic"),
-			(f"{lang}abbr.dic", f"{lang.upper()}abbr.dic")
-		)
-
-		for index, candidates in enumerate(categories):
-			found_specific = False
-			for candidate in candidates:
-				path = os.path.join(dictionary_dir, candidate)
-				if os.path.exists(path):
-					self._dll.eciLoadDict(self._handle, self._dictionary_handle, index, path.encode("mbcs"))
-					found_specific = True
-					break
-			
-			# If no language-specific file was found:
-			if not found_specific:
-				# ONLY allow the generic fallback if the language is English
-				if lang in ("enu", "eng"):
-					# Map index to generic filename
-					generic_name = ["main.dic", "root.dic", "abbr.dic"][index]
-					generic_path = os.path.join(dictionary_dir, generic_name)
-					
-					if os.path.exists(generic_path):
-						self._dll.eciLoadDict(self._handle, self._dictionary_handle, index, generic_path.encode("mbcs"))
-					else:
-						self._dll.eciLoadDict(self._handle, self._dictionary_handle, index, b"")
-				else:
-					# For all other languages (fra, ptb, etc.): 
-					# If no 'fraroot.dic' exists, clear the slot! No English leaking anymore.
-					self._dll.eciLoadDict(self._handle, self._dictionary_handle, index, b"")
+		if language_code not in self._loaded_dictionary_languages:
+			for index, candidates in enumerate(dictionary_candidates):
+				for candidate in candidates:
+					path = os.path.join(dictionary_dir, candidate)
+					if os.path.exists(path):
+						# LOGGER.debug("Loading dictionary index=%s file=%s", index, path)
+						self._dll.eciLoadDict(self._handle, self._dictionary_handle, index, path.encode("mbcs"))
+						break
+			self._loaded_dictionary_languages.add(language_code)
+		self._dll.eciSetDict(self._handle, self._dictionary_handle)
 
 	# ------------------------------------------------------------------
 	# Public API invoked from the controller
@@ -342,55 +338,29 @@ class EloquenceRuntime:
 	def delete(self) -> None:
 		# LOGGER.debug("Deleting Eloquence handle")
 		if self._handle:
+			if self._dll:
+				for dictionary_handle in self._dictionary_handles.values():
+					try:
+						self._dll.eciDeleteDict(self._handle, dictionary_handle)
+					except Exception:
+						LOGGER.exception("Failed to delete Eloquence dictionary")
+			self._dictionary_handles.clear()
+			self._loaded_dictionary_languages.clear()
+			self._dictionary_handle = None
 			self._dll.eciDelete(self._handle)
 			self._handle = None
 
 	def set_param(self, param_id: int, value: int) -> None:
-		if param_id != 9:
-			self._dll.eciSetParam(self._handle, param_id, value)
-			self._params[param_id] = value
-			return
-
-		# --- LANGUAGE CHANGE (ID 9) ---
-		# Map numerical IDs to language prefixes used for dictionary files
-		mapping = {
-			65536: "enu", 65537: "eng", 131072: "esp", 131073: "esm",
-			196608: "fra", 196609: "frc", 262144: "deu", 327680: "ita",
-			393216: "chs", 458752: "ptb", 524288: "jpn", 589824: "fin", 655360: "kor",
-		}
-
-		# Identify the new language. Use "unknown" instead of "enu" as fallback 
-		# to prevent loading English dicts for other languages.
-		new_lang_code = mapping.get(value, "unknown")
-		self._config.language_code = new_lang_code
-
-		# Hard Reset: Delete and recreate handle to clear ECI internal caches/dictionaries
-		self._dll.eciStop(self._handle)
-		self._dll.eciDelete(self._handle)
-		self._handle = self._dll.eciNewEx(value)
-
-		if not self._handle:
-			return
-
-		# Re-establish required settings for the fresh handle
-		self._dll.eciRegisterCallback(self._handle, self._callback, None)
-		self._dll.eciSetOutputBuffer(self._handle, self._samples, self._buffer)
-		self._dictionary_handle = self._dll.eciNewDict(self._handle)
-		self._dll.eciSetDict(self._handle, self._dictionary_handle)
-		self._dll.eciSetParam(self._handle, ECI_INPUT_TYPE, 1)
-
-		# Restore the Voice Variant (Algorithm)
-		# This ensures women's voices use the correct synthesis model after handle recreation
-		if hasattr(self, '_current_variant') and self._current_variant is not None:
-			self._dll.eciCopyVoice(self._handle, self._current_variant, 0)
-
-		# Restore voice parameters (Rate, Pitch, etc.) which are lost on eciDelete
-		for p_id, p_val in self._voice_params.items():
-			self._dll.eciSetVoiceParam(self._handle, 0, p_id, p_val)
-
-		# Trigger dictionary loading for the new language context
-		self._load_dictionaries()
-		self._params[9] = value
+		# LOGGER.debug("Setting param %s=%s", param_id, value)
+		self._dll.eciSetParam(self._handle, param_id, value)
+		self._params[param_id] = value
+		# When changing voice (param 9), update all voice parameters
+		if param_id == 9:
+			self._config.language_code = LANG_BY_ID.get(value, "enu")
+			self._load_dictionaries()
+			# LOGGER.debug("Voice changed, reading voice parameters")
+			for param in (RATE, PITCH, VLM, FLUCTUATION, HSZ, RGH, BTH):
+				self._voice_params[param] = self._dll.eciGetVoiceParam(self._handle, 0, param)
 
 	def set_voice_param(self, param_id: int, value: int, temporary: bool = False) -> None:
 		# LOGGER.debug("Setting voice param %s=%s temporary=%s", param_id, value, temporary)
@@ -400,7 +370,6 @@ class EloquenceRuntime:
 
 	def copy_voice(self, variant: int) -> None:
 		# LOGGER.debug("Copying voice variant %s", variant)
-		self._current_variant = variant # Store variant for language-switch resets
 		self._dll.eciCopyVoice(self._handle, variant, 0)
 		for param in (RATE, PITCH, VLM, FLUCTUATION, HSZ, RGH, BTH):
 			self._voice_params[param] = self._dll.eciGetVoiceParam(self._handle, 0, param)
