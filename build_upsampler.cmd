@@ -5,7 +5,10 @@ echo Building upsampler DLLs...
 set "MSYS2_CANDIDATES=C:\msys64"
 if not "%MSYS2_ROOT%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%MSYS2_ROOT%"
 if not "%MSYS2_LOCATION%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%MSYS2_LOCATION%"
+if not "%CD%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%CD%\msys64"
+if not "%GITHUB_WORKSPACE%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%GITHUB_WORKSPACE%\msys64"
 if not "%RUNNER_TEMP%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%RUNNER_TEMP%\setup-msys2\msys64"
+if not "%RUNNER_TEMP%" == "" set "MSYS2_CANDIDATES=%MSYS2_CANDIDATES%;%RUNNER_TEMP%\setup-msys2"
 
 REM --- 64-bit build ---
 set "MINGW64_BIN="
@@ -14,6 +17,7 @@ for %%R in ("%MSYS2_CANDIDATES:;=" "%") do (
 )
 if "%MINGW64_BIN%" == "" (
     echo MinGW64 not found!
+    echo Checked MSYS2 roots: %MSYS2_CANDIDATES%
     exit /b 1
 )
 
@@ -29,6 +33,7 @@ for %%R in ("%MSYS2_CANDIDATES:;=" "%") do (
 )
 if "%MINGW32_BIN%" == "" (
     echo MinGW32 not found!
+    echo Checked MSYS2 roots: %MSYS2_CANDIDATES%
     exit /b 1
 )
 

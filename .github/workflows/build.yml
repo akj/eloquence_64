@@ -51,6 +51,9 @@ jobs:
         run: |
           $candidates = @(
             "C:\msys64",
+            "$env:GITHUB_WORKSPACE\msys64",
+            "$PWD\msys64",
+            "$env:RUNNER_TEMP\setup-msys2",
             "$env:RUNNER_TEMP\setup-msys2\msys64"
           )
           $root = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
