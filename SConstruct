@@ -1,6 +1,7 @@
 # Eloquence NVDA add-on SConstruct
 # Generates manifest.ini from template + buildVars, then zips addon/ into .nvda-addon.
 
+import glob
 import os
 import sys
 from pathlib import Path
@@ -20,8 +21,6 @@ env.Append(**buildVars.addon_info)
 addonDir = Path("addon")
 
 # --- Compile translations (.po -> .mo) -------------------------------------
-
-import glob
 
 # Find all .po files under addon/locale
 poFiles = glob.glob("addon/locale/*/LC_MESSAGES/*.po")
@@ -104,7 +103,6 @@ for p in Path("addon").rglob("*"):
 potFile = Path(f"{env['addon_name']}.pot")
 
 # Collect all Python sources inside addon/
-pySources = [str(p) for p in addonDir.rglob("*.py")]
 pySources = [str(p) for p in addonDir.rglob("*.py")]
 pySources.append("buildVars.py")
 
