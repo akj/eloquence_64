@@ -48,7 +48,18 @@ jobs:
           update: true
 
       - name: Add MSYS2 to PATH
-        run: echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
+        run: |
+          $candidates = @(
+            "C:\msys64",
+            "$env:RUNNER_TEMP\setup-msys2\msys64"
+          )
+          $root = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $root) {
+            throw "MSYS2 root not found"
+          }
+          "$root\usr\bin" >> $env:GITHUB_PATH
+          "$root\mingw64\bin" >> $env:GITHUB_PATH
+          "$root\mingw32\bin" >> $env:GITHUB_PATH
         shell: pwsh
 
       - name: Build 32-bit host
