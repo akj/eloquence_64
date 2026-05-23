@@ -42,27 +42,14 @@ jobs:
         shell: cmd
 
       - name: Install MSYS2 / gettext
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           install: gettext mingw-w64-x86_64-gcc mingw-w64-i686-gcc
           update: true
 
       - name: Add MSYS2 to PATH
-        run: |
-          $candidates = @(
-            "C:\msys64",
-            "$env:GITHUB_WORKSPACE\msys64",
-            "$PWD\msys64",
-            "$env:RUNNER_TEMP\setup-msys2",
-            "$env:RUNNER_TEMP\setup-msys2\msys64"
-          )
-          $root = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $root) {
-            throw "MSYS2 root not found"
-          }
-          "$root\usr\bin" >> $env:GITHUB_PATH
-          "$root\mingw64\bin" >> $env:GITHUB_PATH
-          "$root\mingw32\bin" >> $env:GITHUB_PATH
+        run: '"${{ steps.msys2.outputs.msys2-location }}\usr\bin" >> $env:GITHUB_PATH'
         shell: pwsh
 
       - name: Build 32-bit host
@@ -74,6 +61,8 @@ jobs:
       - name: Build upsampler DLLs
         run: build_upsampler.cmd
         shell: cmd
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: Fetch proprietary files
         run: python fetch_eci.py
