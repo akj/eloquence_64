@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from addon.synthDrivers._text_preprocessing import preprocess
 
@@ -14,6 +15,12 @@ class TextPreprocessingTests(unittest.TestCase):
 		for voice_id in (524288, 655360):
 			with self.subTest(voice_id=voice_id):
 				self.assertEqual(preprocess("選設檢", voice_id), "選設檢")
+
+	def test_english_preprocessing_separates_em_dash_from_closing_double_quote(self):
+		with patch("addon.synthDrivers._text_preprocessing._normalize_text", lambda text: text):
+			for quote in ('"', "\u201d"):
+				with self.subTest(quote=quote):
+					self.assertEqual(preprocess(f"Wait\u2014{quote} she said.", 65536), f"Wait\u2014 {quote} she said.")
 
 
 if __name__ == "__main__":
