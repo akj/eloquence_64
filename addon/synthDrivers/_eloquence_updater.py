@@ -91,7 +91,7 @@ def show_update_dialog(parent, changes, latest_version):
 
 
 class EloquenceUpdateManager:
-	REPO_OWNER = "fastfinge"
+	REPO_OWNER = "hozosch"
 	REPO_NAME = "eloquence_64"
 
 	def __init__(self, addon_dir):
