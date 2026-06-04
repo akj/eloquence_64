@@ -39,11 +39,11 @@ void process(int16_t * restrict in,
              int n_samples,
              int16_t * restrict out)
 {
-    const float hf_gain = 2.5f;
-    const float out_gain = 0.85f;
+    const float hf_gain = 3.5f;
+    const float out_gain = 0.80f;
 
-    /* SVF (~6.3 kHz speech presence region) */
-    const float g = tanf(PI * 6300.0f / FS);
+    /* SVF (~6.6 kHz speech presence region) */
+    const float g = tanf(PI * 6600.0f / FS);
     const float a1 = 1.0f / (1.0f + g * (g + 1.0f / 3.0f));
     const float a2 = g * a1;
 
