@@ -8,8 +8,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Eloquence v16\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-04 22:01+0200\n"
-"PO-Revision-Date: 2026-06-04 22:09+0200\n"
+"POT-Creation-Date: 2026-06-05 16:41+0200\n"
+"PO-Revision-Date: 2026-06-05 16:41+0200\n"
 "Last-Translator: Karl Eick <hozosch@web.de>\n"
 "Language-Team: \n"
 "Language: de\n"
@@ -27,7 +27,7 @@ msgstr "Die neueste Version enthält kein NVDA-Erweiterungspaket."
 msgid "Downloading update... {percent}%"
 msgstr "Update herunterladen... {percent}%"
 
-#: synthDrivers/eloquence.py:127 synthDrivers/eloquence.py:665
+#: synthDrivers/eloquence.py:127 synthDrivers/eloquence.py:655
 msgid "Eloquence"
 msgstr "Eloquence"
 
@@ -76,8 +76,8 @@ msgstr ""
 
 #: synthDrivers/eloquence.py:205 synthDrivers/eloquence.py:245
 #: synthDrivers/eloquence.py:253 synthDrivers/eloquence.py:272
-#: synthDrivers/eloquence.py:286 synthDrivers/eloquence.py:447
-#: synthDrivers/eloquence.py:674
+#: synthDrivers/eloquence.py:286 synthDrivers/eloquence.py:437
+#: synthDrivers/eloquence.py:664
 msgid "Error"
 msgstr "Fehler"
 
@@ -93,7 +93,7 @@ msgstr ""
 "Eloquence sollte nun normal auf dem Anmeldebildschirm, beim Start und auf "
 "anderen sicheren Bildschirmen geladen werden."
 
-#: synthDrivers/eloquence.py:226 synthDrivers/eloquence.py:657
+#: synthDrivers/eloquence.py:226 synthDrivers/eloquence.py:647
 msgid "Success"
 msgstr "Erfolg"
 
@@ -211,20 +211,7 @@ msgstr "Installiere ERweiterungspaket..."
 msgid "Update cancelled."
 msgstr "Update abgebrochen."
 
-#: synthDrivers/eloquence.py:404
-#, python-brace-format
-msgid ""
-"Update to {latest_version} installed successfully and will be applied after "
-"NVDA restarts."
-msgstr ""
-"Update auf {latest_version} erfolgreich installiert, wird nach NVDA-Neustart "
-"übernommen."
-
-#: synthDrivers/eloquence.py:407
-msgid "Update Successful"
-msgstr "Update erfolgreich"
-
-#: synthDrivers/eloquence.py:418
+#: synthDrivers/eloquence.py:408
 #, python-brace-format
 msgid ""
 "Update failed: {e}\n"
@@ -235,15 +222,15 @@ msgstr ""
 "\n"
 "Ihre Erweiterung wurde nicht verändert."
 
-#: synthDrivers/eloquence.py:421
+#: synthDrivers/eloquence.py:411
 msgid "Update Failed"
 msgstr "Updatefehler"
 
-#: synthDrivers/eloquence.py:445
+#: synthDrivers/eloquence.py:435
 msgid "Please select a dictionary first."
 msgstr "Bitte wählen Sie zuerst ein Wörterbuch."
 
-#: synthDrivers/eloquence.py:651
+#: synthDrivers/eloquence.py:641
 #, python-brace-format
 msgid ""
 "Dictionary update successful!\n"
@@ -262,50 +249,50 @@ msgstr ""
 "Hinweis: CP1252-Kodierung erzwungen; einige Akzente wurden aus "
 "Kompatibilitätsgründen möglicherweise entfernt."
 
-#: synthDrivers/eloquence.py:663
+#: synthDrivers/eloquence.py:653
 msgid "No new updates found. Your dictionaries are already up to date."
 msgstr ""
 "Keine neuen Updates gefunden. Ihre Wörterbücher sind bereits auf dem "
 "neuesten Stand."
 
-#: synthDrivers/eloquence.py:672
+#: synthDrivers/eloquence.py:662
 #, python-brace-format
 msgid "An error occurred while updating the dictionary: {e}"
 msgstr "Ein Fehler ist beim Aktualisieren des Wörterbuchs aufgetreten: {e}"
 
-#: synthDrivers/eloquence.py:691
+#: synthDrivers/eloquence.py:681
 msgid "Hea&d size"
 msgstr "&Kopfgröße"
 
-#: synthDrivers/eloquence.py:694
+#: synthDrivers/eloquence.py:684
 msgid "Rou&ghness"
 msgstr "&Rauigkeit"
 
-#: synthDrivers/eloquence.py:697
+#: synthDrivers/eloquence.py:687
 msgid "Breathi&ness"
 msgstr "&Behauchtheit"
 
-#: synthDrivers/eloquence.py:702
+#: synthDrivers/eloquence.py:692
 msgid "Enable backquote voice &tags"
 msgstr "&Gravis-Sprachtags zulassen"
 
-#: synthDrivers/eloquence.py:709
+#: synthDrivers/eloquence.py:699
 msgid "Enable &abbreviation dictionary"
 msgstr "&Abkürzungswörterbuch verwenden"
 
-#: synthDrivers/eloquence.py:716
+#: synthDrivers/eloquence.py:706
 msgid "Enable phras&e prediction"
 msgstr "&Satzvorhersage einschalten"
 
-#: synthDrivers/eloquence.py:723
+#: synthDrivers/eloquence.py:713
 msgid "Shorten &pauses"
 msgstr "&Pausen kürzen"
 
-#: synthDrivers/eloquence.py:730
+#: synthDrivers/eloquence.py:720
 msgid "&Sample rate"
 msgstr "&Abtastrate"
 
-#: synthDrivers/eloquence.py:831
+#: synthDrivers/eloquence.py:821
 msgid ""
 "Eloquence has been updated with a new communication system.\n"
 "\n"
@@ -324,21 +311,32 @@ msgstr ""
 "\n"
 "Diese Meldung wird nur einmal angezeigt."
 
-#: synthDrivers/eloquence.py:837
+#: synthDrivers/eloquence.py:827
 msgid "Eloquence Update Notice"
 msgstr "Eloquence-Aktualisierungshinweis"
 
-#: synthDrivers/eloquence.py:1058
+#: synthDrivers/eloquence.py:1048
 msgid "Never"
 msgstr "Nie"
 
-#: synthDrivers/eloquence.py:1060
+#: synthDrivers/eloquence.py:1050
 msgid "At end of text only"
 msgstr "Nur am Textende"
 
-#: synthDrivers/eloquence.py:1062
+#: synthDrivers/eloquence.py:1052
 msgid "Always"
 msgstr "Immer"
+
+#, python-brace-format
+#~ msgid ""
+#~ "Update to {latest_version} installed successfully and will be applied "
+#~ "after NVDA restarts."
+#~ msgstr ""
+#~ "Update auf {latest_version} erfolgreich installiert, wird nach NVDA-"
+#~ "Neustart übernommen."
+
+#~ msgid "Update Successful"
+#~ msgstr "Update erfolgreich"
 
 #~ msgid "Extracting update..."
 #~ msgstr "Update extrahieren..."
