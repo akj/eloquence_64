@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 from ctypes import CDLL, POINTER, c_int16, c_int
 from platform import architecture
 
-from . import _eloquence_ipc
+from . import _eloquence_ipc as _ipc
 
 import config
 import nvwave
@@ -30,59 +30,61 @@ AUTH_KEY_BYTES = 16
 
 
 # Audio handling -----------------------------------------------------------------
-# --- Upsampler DLL setup (arch-aware) ---
-
-dll_name = "upsampler64.dll" if architecture()[0] == "64bit" else "upsampler32.dll"
-upsampler_dll_path = os.path.join(os.path.dirname(__file__), dll_name)
+# Optional native upsampler. Mode 2 uses Eloquence at 11025 Hz and feeds the
+# processed output to NVDA at twice that rate.
+_dll_name = "upsampler64.dll" if architecture()[0] == "64bit" else "upsampler32.dll"
+_upsampler_dll_path = os.path.join(os.path.dirname(__file__), _dll_name)
 
 try:
-	upsampler_dll = CDLL(upsampler_dll_path)
-
+	upsampler_dll = CDLL(_upsampler_dll_path)
 	upsampler_dll.process.argtypes = (POINTER(c_int16), c_int, POINTER(c_int16))
 	upsampler_dll.process.restype = None
-
 	upsampler_dll.reset.argtypes = ()
 	upsampler_dll.reset.restype = None
-
 except Exception:
-	LOGGER.exception(f"Failed to load {dll_name}")
+	LOGGER.exception("Failed to load %s", _dll_name)
 	upsampler_dll = None
 
-# --- Audio rate management constants ---
-# These must be defined before the class starts!
 _ECI_BASE_RATE_MAP = {
 	0: 8000,
 	1: 11025,
-	2: 11025
+	2: 11025,
 }
-# Use 11kHz as the hardcoded default for the very first initialization
-_current_sample_rate_mode = 1 
-_eci_sample_rate = 5
+_current_sample_rate_mode = 1
+_ECI_SAMPLE_RATE_PARAM = 5
 
-def get_sample_rate():
-	"""Helper to safely access the global sample rate mode."""
-	global _current_sample_rate_mode
+
+def get_sample_rate() -> int:
 	return _current_sample_rate_mode
 
-def set_sample_rate(mode):
-	global _current_sample_rate_mode, _eci_sample_rate
 
+def set_sample_rate(mode) -> None:
+	"""Select 8 kHz, 11.025 kHz, or the upsampled mode.
+
+	The WavePlayer is normally recreated by the caller after this setting changes.
+	"""
+	global _current_sample_rate_mode
 	try:
-		_current_sample_rate_mode = int(mode)
-	except (ValueError, TypeError):
-		_current_sample_rate_mode = 1
+		mode = int(mode)
+	except (TypeError, ValueError):
+		mode = 1
+	if mode not in _ECI_BASE_RATE_MAP:
+		mode = 1
+	_current_sample_rate_mode = mode
 
-	if not _client:
-		return
-
-	eci_val = 0 if _current_sample_rate_mode == 0 else 1
-
+	# Eloquence itself only knows its native 8 kHz and 11.025 kHz modes.
+	eci_value = 0 if mode == 0 else 1
 	try:
-		_client.set_param(_eci_sample_rate, eci_val)
+		_client.set_param(_ECI_SAMPLE_RATE_PARAM, eci_value)
 	except Exception:
 		LOGGER.exception("Failed to set Eloquence sample rate")
 
+
 class AudioWorker(threading.Thread):
+	_CHANNELS = 1
+	_BITS_PER_SAMPLE = 16
+	_SAMPLE_RATE = 11025
+
 	def __init__(
 		self,
 		player: nvwave.WavePlayer,
@@ -97,71 +99,104 @@ class AudioWorker(threading.Thread):
 		self._stopping = False
 		self._player_lock = threading.RLock()
 
-	def _reset_filter(self):
-		"""Reset the DLL upsampler state to avoid clicks."""
+	def _reset_upsampler(self) -> None:
 		if upsampler_dll:
-			upsampler_dll.reset()
+			try:
+				upsampler_dll.reset()
+			except Exception:
+				LOGGER.exception("Failed to reset upsampler")
 
 	def run(self) -> None:
-		q_get = self._queue.get
-		task_done = self._queue.task_done
-
+		pending_audio: Optional[AudioChunk] = None
 		while self._running:
 			try:
-				chunk = q_get(timeout=0.1)
+				chunk = self._queue.get(timeout=0.1)
 			except queue.Empty:
 				continue
-
 			if chunk is None:
 				break
-
 			data, index, is_final, seq = chunk
-
+			if pending_audio and pending_audio[3] < self._client._sequence:
+				pending_audio = None
+				self._reset_upsampler()
 			if seq < self._client._sequence:
-				self._reset_filter()
-				task_done()
+				self._reset_upsampler()
+				self._queue.task_done()
 				continue
 
-			if not data:
-				if not self._stopping:
-					if index is not None:
-						self._invoke_index_callback(index)
-					if is_final:
-						self._reset_filter()
-						self._schedule_idle()
-
-				task_done()
+			if data:
+				# Hold one real Audio Chunk so a following index-only event can use
+				# WavePlayer's completion callback without feeding a synthetic sample.
+				if pending_audio:
+					self._feed_audio(*pending_audio[:3])
+				pending_audio = chunk
+				self._queue.task_done()
 				continue
 
-			on_done = self._make_on_done(
-				(lambda: self._invoke_index_callback(index)) if index is not None else None,
-				is_final,
-			)
+			# The Eloquence Host Process reports Speech Indexes as index-only
+			# events. Attach the notification to the preceding real Audio Chunk so
+			# NVDA receives it only after that audio finishes playing.
+			if pending_audio:
+				pending_data, pending_index, pending_final, _pending_seq = pending_audio
+				self._feed_audio(
+					pending_data,
+					index if index is not None else pending_index,
+					pending_final,
+				)
+				pending_audio = None
+				index = None
+			if not self._stopping:
+				if index is not None:
+					self._sync_and_invoke_index(index)
+				if is_final:
+					self._schedule_idle()
+			self._queue.task_done()
 
-			try:
-				with self._player_lock:
-					if not self._stopping and self._player:
-						# Use the global function to get the current mode safely
-						current_mode = get_sample_rate()
+	def _feed_audio(self, data: bytes, index: Optional[int], is_final: bool) -> None:
+		"""Feed a real Audio Chunk and attach its Speech Progress Notification."""
 
-						if current_mode == 2 and upsampler_dll:
-							# ── HQ Path: Upsampling 11k -> 44k ────────────────
-							input_samples = memoryview(data).cast("h")
-							in_len = len(input_samples)
-							in_ptr = (c_int16 * in_len).from_buffer_copy(data)
-							
-							out_len = in_len * 2
-							out_buffer = (c_int16 * out_len)()
+		on_done = None
+		if index is not None:
 
-							upsampler_dll.process(in_ptr, in_len, out_buffer)
-							self._player.feed(bytes(out_buffer), onDone=on_done)
-						else:
-							# ── Standard Path: 8k or 11k direct ───────────────
-							self._player.feed(data, onDone=on_done)
-			except Exception:
-				LOGGER.exception("AudioWorker: Failed to feed player")
+			def _callback(i=index):
+				self._invoke_index_callback(i)
 
-			task_done()
+			on_done = _callback
+
+		wrapped_on_done = self._make_on_done(on_done, is_final) if on_done or is_final else None
+
+		# Early exit if stopping - avoids unnecessary lock acquisition
+		if self._stopping:
+			return
+
+		# Feed directly - blocks if buffer is full
+		try:
+			with self._player_lock:
+				if not self._stopping and self._player:
+					if get_sample_rate() == 2 and upsampler_dll:
+						in_len = len(data) // 2
+						if in_len:
+							in_buffer = (c_int16 * in_len).from_buffer_copy(data)
+							out_buffer = (c_int16 * (in_len * 2))()
+							upsampler_dll.process(in_buffer, in_len, out_buffer)
+							self._player.feed(bytes(out_buffer), onDone=wrapped_on_done)
+					else:
+						self._player.feed(data, onDone=wrapped_on_done)
+		except FileNotFoundError:
+			LOGGER.warning("Sound device not found during feed")
+		except Exception:
+			LOGGER.exception("WavePlayer feed failed")
+
+	def _sync_and_invoke_index(self, index: int) -> None:
+		"""Report a Speech Index that has no real Audio Chunk to carry it."""
+		try:
+			with self._player_lock:
+				if not self._stopping and self._player:
+					self._player.sync()
+		except Exception:
+			LOGGER.exception("WavePlayer sync failed")
+		if not self._stopping:
+			self._invoke_index_callback(index)
 
 	def stop(self) -> None:
 		self._stopping = True
@@ -182,6 +217,7 @@ class AudioWorker(threading.Thread):
 
 	def _schedule_idle(self) -> None:
 		"""Signal the player that playback is complete."""
+		self._reset_upsampler()
 		try:
 			with self._player_lock:
 				if not self._stopping and self._player:
@@ -236,7 +272,7 @@ class EloquenceHostClient:
 			return
 		addon_dir = os.path.abspath(os.path.dirname(__file__))
 		authkey = os.urandom(AUTH_KEY_BYTES)
-		listener = _eloquence_ipc.create_listener()
+		listener = _ipc.create_listener()
 		port = listener.getsockname()[1]
 		cmd = list(self._resolve_host_executable(addon_dir))
 		cmd.extend(
@@ -252,7 +288,7 @@ class EloquenceHostClient:
 		LOGGER.info("Launching Eloquence host: %s", cmd)
 		proc = subprocess.Popen(cmd, cwd=addon_dir)
 		try:
-			conn = _eloquence_ipc.accept_authenticated(listener, authkey)
+			conn = _ipc.accept_authenticated(listener, authkey)
 		except (TimeoutError, OSError) as exc:
 			LOGGER.error("Eloquence host failed to connect: %s", exc)
 			exit_code = proc.poll()
@@ -270,9 +306,7 @@ class EloquenceHostClient:
 				listener.close()
 			except Exception:
 				pass
-			raise RuntimeError(
-				f"Eloquence host process failed to start: {exc}"
-			) from exc
+			raise RuntimeError(f"Eloquence host process failed to start: {exc}") from exc
 		self._host = HostProcess(process=proc, connection=conn, listener=listener)
 		self._receiver = threading.Thread(target=self._receiver_loop, daemon=True)
 		self._receiver.start()
@@ -300,33 +334,29 @@ class EloquenceHostClient:
 
 		mode = get_sample_rate()
 		base_rate = _ECI_BASE_RATE_MAP.get(mode, 11025)
-		
-		if mode == 2 and upsampler_dll:
-			target_rate = base_rate * 2
-		else:
-			target_rate = base_rate
-
-		# Ensure target_rate is integer
-		target_rate = int(target_rate)
+		target_rate = base_rate * 2 if mode == 2 and upsampler_dll else base_rate
 
 		try:
 			if version_year >= 2025:
 				device = config.conf["audio"]["outputDevice"]
-				player = nvwave.WavePlayer(1, target_rate, 16, outputDevice=device)
+				player = nvwave.WavePlayer(1, int(target_rate), 16, outputDevice=device)
 			else:
 				device = config.conf["speech"]["outputDevice"]
 				nvwave.WavePlayer.MIN_BUFFER_MS = 1500
-				player = nvwave.WavePlayer(1, target_rate, 16, outputDevice=device, buffered=True)
-			
+				player = nvwave.WavePlayer(
+					1,
+					int(target_rate),
+					16,
+					outputDevice=device,
+					buffered=True,
+				)
 			self._player = player
-			# Important: Use the new player for the worker
 			self._audio_worker = AudioWorker(player, self._audio_queue, self)
 			self._audio_worker.start()
-			LOGGER.info(f"Eloquence: Audio initialized at {target_rate}Hz (Mode {mode})")
+			LOGGER.info("Eloquence audio initialized at %d Hz (mode %d)", target_rate, mode)
 		except Exception:
-			LOGGER.exception("Eloquence: Failed to initialize WavePlayer")
+			LOGGER.exception("Failed to initialize Eloquence WavePlayer")
 			self._player = None
-
 
 	# ------------------------------------------------------------------
 	def close_audio(self) -> None:
@@ -460,13 +490,11 @@ class EloquenceHostClient:
 			return response.get("payload", {})
 
 	def set_param(self, param: int, value: int) -> None:
-		"""Sends an ECI parameter change to the 32-bit host process."""
+		"""Send a non-blocking ECI parameter change to the host."""
 		if not self._host:
 			return
-
 		try:
-			# Use the camelCase command expected by the 32-bit host and the expected payload keys
-			self.send_command("setParam", wait=False, paramId=param, value=value)
+			self.send_command("setParam", wait=False, paramId=int(param), value=int(value))
 		except Exception:
 			LOGGER.exception("Failed to send ECI parameter to host")
 
@@ -714,11 +742,10 @@ def initialize(indexCallback=None):
 
 def speak(text):
 	try:
-		# Use appropriate encoding for Asian languages
 		encoding = LANG_ENCODINGS.get(_current_lang, "mbcs")
 		if encoding == "mbcs":
-			# Use Windows best-fit mapping so characters like Đ→D, ł→l
-			# instead of becoming '?' (see issue #90).
+			# Use Windows best-fit mapping so characters like Đ→D and ł→l
+			# instead of replacing them immediately with question marks.
 			from ._text_preprocessing import _wchar_to_mbcs
 
 			text_bytes = _wchar_to_mbcs(text)
