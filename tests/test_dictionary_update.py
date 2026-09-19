@@ -108,11 +108,18 @@ class MergeTests(DictionaryUpdateTestCase):
 		self.assertEqual({name: self.read_local(name) for name in files}, before)
 
 	def test_local_entries_win_and_keep_their_exact_bytes(self):
-		# No trailing newline, a stray byte cp1252 cannot decode, and a key the source also defines.
-		local = b"NVDA\tmy own way\r\ncaf\xe9\tcoffee\nodd\x81key\tkept"
+		# No trailing newline, a byte cp1252 leaves undefined, bare CR line endings, and keys the source
+		# also defines, one of them with a cp1252-only character.
+		local = b"NVDA\tmy own way\r\ncaf\xe9\tcoffee\ncan\x92t\tmine\rMac\told style\rodd\x81key\tkept"
 		self.write_local("enumain.dic", local)
 
-		result = self.update({"enumain.dic": "NVDA\ten vee dee ay\nGUI\tgooey\n"})
+		result = self.update(
+			{
+				"enumain.dic": "NVDA\ten vee dee ay\ncan\u2019t\tsource\nMac\tsource\nGUI\tgooey\n".encode(
+					"utf-8"
+				)
+			}
+		)
 
 		self.assertEqual(self.read_local("enumain.dic"), local + b"\r\nGUI\tgooey\r\n")
 		self.assertEqual(result.files[0].status, FileStatus.UPDATED)
@@ -184,6 +191,14 @@ class FailureTests(DictionaryUpdateTestCase):
 		self.assertEqual([o.filename for o in result.changed], ["enuroot.dic"])
 		self.assertEqual(self.read_local("enumain.dic"), b"NVDA\tlocal\r\n")
 		self.assertNoTemporaryFiles()
+
+	def test_unrelated_tmp_file_next_to_a_dictionary_is_left_alone(self):
+		self.write_local("enumain.dic.tmp", b"someone else's file")
+
+		self.update({"enumain.dic": "GUI\tgooey\n"})
+
+		self.assertEqual(self.read_local("enumain.dic.tmp"), b"someone else's file")
+		self.assertEqual(sorted(os.listdir(self.dictionary_dir)), ["enumain.dic", "enumain.dic.tmp"])
 
 	def test_binary_source_file_fails_instead_of_adding_garbage_entries(self):
 		self.write_local("enumain.dic", b"NVDA\tlocal\r\n")

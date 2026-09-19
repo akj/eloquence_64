@@ -74,13 +74,26 @@ class BackgroundWorkTests(unittest.TestCase):
 		self.addCleanup(translation.stop)
 		sys.modules.pop("addon.synthDrivers._background_work", None)
 		self.module = importlib.import_module("addon.synthDrivers._background_work")
-		self.addCleanup(sys.modules.pop, "addon.synthDrivers._background_work", None)
+		self.addCleanup(self.forget_module)
 		self.done = []
 		self.errors = []
 
+	def forget_module(self):
+		"""The module under test is bound to the fake wx, so no later test may find it already imported."""
+		sys.modules.pop("addon.synthDrivers._background_work", None)
+		package = sys.modules.get("addon.synthDrivers")
+		if package is not None and hasattr(package, "_background_work"):
+			delattr(package, "_background_work")
+
 	def start(self, work, **kwargs):
 		return self.module.BackgroundWork(
-			object(), "title", "message", work, self.done.append, self.errors.append, **kwargs
+			object(),
+			"title",
+			"message",
+			work,
+			lambda result, cancelled: self.done.append((result, cancelled)),
+			self.errors.append,
+			**kwargs,
 		)
 
 	def test_work_runs_on_another_thread_and_result_returns_through_call_after(self):
@@ -99,7 +112,7 @@ class BackgroundWorkTests(unittest.TestCase):
 		self.assertEqual(self.done, [])
 
 		self.wx.run_next_call()
-		self.assertEqual(self.done, ["result"])
+		self.assertEqual(self.done, [("result", False)])
 		self.assertEqual(self.errors, [])
 		self.assertIsNot(work_threads[0], threading.current_thread())
 		self.assertTrue(background._dialog.destroyed)
@@ -130,7 +143,7 @@ class BackgroundWorkTests(unittest.TestCase):
 		background._dialog.on_timer(None)
 		self.wx.run_next_call()
 
-		self.assertEqual(self.done, ["stopped early"])
+		self.assertEqual(self.done, [("stopped early", True)])
 		self.assertEqual(background._dialog.updates[-1], (None, "Cancelling..."))
 
 	def test_done_message_holds_the_dialog_at_completion(self):
@@ -138,7 +151,29 @@ class BackgroundWorkTests(unittest.TestCase):
 		self.wx.run_next_call()
 
 		self.assertEqual(background._dialog.updates[-1], (100, "close me"))
-		self.assertEqual(self.done, ["path"])
+		self.assertEqual(self.done, [("path", False)])
+
+	def test_cancel_pressed_after_work_finished_is_still_reported(self):
+		background = self.start(lambda is_cancelled, report: "path", doneMessage="close me")
+		background._dialog.cancel_pressed = True
+		self.wx.run_next_call()
+
+		self.assertEqual(self.done, [("path", True)])
+		self.assertNotIn((100, "close me"), background._dialog.updates)
+
+	def test_finish_waits_for_a_dialog_update_that_is_still_running(self):
+		background = self.start(lambda is_cancelled, report: "result")
+		finish = self.wx.calls.get(timeout=5)
+		background._updating = True
+		finish[0](*finish[1])
+
+		self.assertFalse(background._dialog.destroyed)
+		self.assertEqual(self.done, [])
+
+		background._updating = False
+		self.wx.run_next_call()
+		self.assertTrue(background._dialog.destroyed)
+		self.assertEqual(self.done, [("result", False)])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ outside NVDA's UI thread. It has no NVDA or wx dependencies.
 import enum
 import logging
 import os
+import re
 import tempfile
 import unicodedata
 import urllib.request
@@ -202,14 +203,14 @@ def _decode(data):
 	"""Decode a dictionary file of unknown encoding.
 
 	Dictionary Sources publish a mix of UTF-8 and ANSI files. Text with accented characters in cp1252 is
-	almost never valid UTF-8, so trying UTF-8 first separates the two. latin-1 accepts any byte.
+	almost never valid UTF-8, so trying UTF-8 first separates the two. The few bytes cp1252 leaves
+	undefined become U+FFFD, which only affects the entry they sit in. Decoded local text is used for
+	key comparison only and is never written back.
 	"""
-	for encoding in ("utf-8-sig", DICTIONARY_ENCODING):
-		try:
-			return data.decode(encoding)
-		except UnicodeDecodeError:
-			continue
-	return data.decode("latin-1")
+	try:
+		return data.decode("utf-8-sig")
+	except UnicodeDecodeError:
+		return data.decode(DICTIONARY_ENCODING, errors="replace")
 
 
 def _parse_entries(text):
@@ -218,7 +219,7 @@ def _parse_entries(text):
 	Lines with no translation are not valid entries, and the engine requires a tab between the two
 	parts, so entries separated by spaces come out normalised.
 	"""
-	for line in text.split("\n"):
+	for line in re.split(r"\r\n|\r|\n", text):
 		parts = line.strip().split(None, 1)
 		if len(parts) == 2:
 			yield parts[0], parts[1]
@@ -240,9 +241,11 @@ def _strip_accents(text):
 
 
 def _write_atomically(dest_path, data):
-	temp_path = dest_path + ".tmp"
+	directory, filename = os.path.split(dest_path)
+	# A unique name in the same directory, so the replace stays on one volume and cannot clobber a user's file.
+	descriptor, temp_path = tempfile.mkstemp(dir=directory, prefix=filename + ".", suffix=".tmp")
 	try:
-		with open(temp_path, "wb") as f:
+		with os.fdopen(descriptor, "wb") as f:
 			f.write(data)
 		os.replace(temp_path, dest_path)
 	except BaseException:

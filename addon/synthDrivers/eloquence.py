@@ -260,24 +260,21 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 			self._reportAddonUpdateError(e)
 			return
 
-		def check(is_cancelled, report):
-			update = manager.check_for_updates()
-			if is_cancelled():
-				raise _eloquence_updater.UpdateCancelled()
-			return update
-
 		BackgroundWork(
 			self,
 			# Translators: Title of a progress dialog when updating the add-on
 			_("Checking for Updates"),
 			# Translators: Message of a progress dialog when updating the add-on
 			_("Checking for updates..."),
-			check,
-			lambda update: self._onAddonUpdateChecked(manager, *update),
+			lambda is_cancelled, report: manager.check_for_updates(),
+			lambda update, cancelled: self._onAddonUpdateChecked(manager, cancelled, *update),
 			self._reportAddonUpdateError,
 		)
 
-	def _onAddonUpdateChecked(self, manager, has_update, latest_version, download_url, changelog):
+	def _onAddonUpdateChecked(self, manager, cancelled, has_update, latest_version, download_url, changelog):
+		if cancelled:
+			self._reportAddonUpdateCancelled()
+			return
 		if not has_update:
 			wx.MessageBox(
 				# Translators: Text of a message dialog when updating the add-on
@@ -316,7 +313,7 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 			# Translators: Title of a progress dialog when updating the add-on
 			_("Downloading..."),
 			lambda is_cancelled, report: manager.download_update(download_url, report, is_cancelled),
-			lambda addon_path: self._installAddonUpdate(manager, addon_path),
+			lambda addon_path, cancelled: self._installAddonUpdate(manager, addon_path, cancelled),
 			self._reportAddonUpdateError,
 			# Translators: The download has finished; closing this dialog continues the add-on installation.
 			doneMessage=_(
@@ -324,8 +321,12 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 			),
 		)
 
-	def _installAddonUpdate(self, manager, addon_path):
+	def _installAddonUpdate(self, manager, addon_path, cancelled):
 		"""Hands the downloaded Add-on Package to NVDA's installer, which must run on the UI thread."""
+		if cancelled:
+			manager.cleanup()
+			self._reportAddonUpdateCancelled()
+			return
 		try:
 			installed = manager.install_update(addon_path, self)
 		except Exception as e:
@@ -412,7 +413,8 @@ class EloquenceSettingsPanel(gui.settingsDialogs.SettingsPanel):
 			self._reportDictionaryUpdateError,
 		)
 
-	def _reportDictionaryUpdate(self, result):
+	def _reportDictionaryUpdate(self, result, cancelled):
+		# result.cancelled says whether the update itself stopped early; a late Cancel press changed nothing.
 		paragraphs = []
 		if result.changed:
 			paragraphs.append(
